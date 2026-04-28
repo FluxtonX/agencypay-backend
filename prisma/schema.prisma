@@ -1,0 +1,403 @@
+// =============================================================================
+// AgncyPay — Prisma Schema
+// Production-grade double-entry ledger with payment orchestration
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =============================================================================
+// WALLET DOMAIN
+// =============================================================================
+
+enum WalletType {
+  INDIVIDUAL
+  BUSINESS
+  PLATFORM   // The system's own wallet for fees, float, etc.
+}
+
+enum WalletStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+model Wallet {
+  id        String       @id @default(uuid())
+  type      WalletType
+  status    WalletStatus @default(ACTIVE)
+  name      String
+  email     String?
+  metadata  Json?
+
+  accounts         Account[]
+  externalAccounts ExternalAccount[]
+  creditLines      CreditLine[]
+  riskAssessments  RiskAssessment[]
+  payments         Payment[]
+  payouts          Payout[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@map("wallets")
+}
+
+model ExternalAccount {
+  id             String  @id @default(uuid())
+  walletId       String
+  provider       String  // "quickbooks", "stripe", etc.
+  externalId     String  // The ID in the external system
+  externalType   String? // "customer", "vendor", "employee"
+  metadata       Json?
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, externalId])
+  @@index([walletId])
+  @@map("external_accounts")
+}
+
+// =============================================================================
+// LEDGER DOMAIN (Source of Truth)
+// =============================================================================
+
+enum AccountType {
+  CASH        // Settled funds
+  PAYABLE     // Owed by the platform to this wallet
+  RECEIVABLE  // Owed to the platform from this wallet
+  CREDIT      // Net-0 credit exposure
+  FEE         // Platform fee collection
+  SUSPENSE    // Temporary holding during settlement
+}
+
+model Account {
+  id        String      @id @default(uuid())
+  walletId  String
+  type      AccountType
+  currency  String      @default("USD")
+  metadata  Json?
+
+  wallet  Wallet        @relation(fields: [walletId], references: [id])
+  entries LedgerEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([walletId, type, currency])
+  @@index([walletId])
+  @@index([type])
+  @@map("accounts")
+}
+
+enum TransactionStatus {
+  PENDING
+  POSTED
+  FAILED
+  REVERSED
+}
+
+enum TransactionType {
+  PAYMENT_RECEIVED
+  PAYMENT_SPLIT
+  PAYOUT_INITIATED
+  PAYOUT_SETTLED
+  CREDIT_ADVANCE
+  CREDIT_REPAYMENT
+  FEE_COLLECTION
+  REFUND
+  CHARGEBACK
+  ADJUSTMENT
+}
+
+model LedgerTransaction {
+  id            String            @id @default(uuid())
+  referenceId   String            // External reference (payment ID, payout ID, etc.)
+  referenceType String            // "payment", "payout", "credit", etc.
+  type          TransactionType
+  status        TransactionStatus @default(PENDING)
+  description   String?
+  metadata      Json?
+
+  entries LedgerEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  postedAt  DateTime?
+
+  @@index([referenceId, referenceType])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("ledger_transactions")
+}
+
+model LedgerEntry {
+  id            String @id @default(uuid())
+  transactionId String
+  accountId     String
+  amount        Decimal @db.Decimal(19, 4) // Positive = debit, Negative = credit
+  currency      String  @default("USD")
+  description   String?
+  metadata      Json?
+
+  transaction LedgerTransaction @relation(fields: [transactionId], references: [id])
+  account     Account           @relation(fields: [accountId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([transactionId])
+  @@index([accountId])
+  @@index([accountId, createdAt])
+  @@map("ledger_entries")
+}
+
+// =============================================================================
+// PAYMENTS DOMAIN
+// =============================================================================
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SETTLED
+  PARTIALLY_SETTLED
+  FAILED
+  REFUNDED
+  CHARGEBACKED
+}
+
+enum PaymentSource {
+  QUICKBOOKS
+  API
+  MANUAL
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  walletId          String
+  externalId        String?       // QuickBooks payment ID, etc.
+  source            PaymentSource
+  amount            Decimal       @db.Decimal(19, 4)
+  currency          String        @default("USD")
+  status            PaymentStatus @default(PENDING)
+  invoiceId         String?       // External invoice reference
+  invoiceData       Json?         // Normalized invoice snapshot
+  splitConfig       Json?         // Split ratios/participants
+  settledAmount     Decimal?      @db.Decimal(19, 4)
+  description       String?
+  metadata          Json?
+
+  wallet Wallet  @relation(fields: [walletId], references: [id])
+  splits PaymentSplit[]
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  settledAt    DateTime?
+
+  @@unique([source, externalId])
+  @@index([walletId])
+  @@index([status])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model PaymentSplit {
+  id           String  @id @default(uuid())
+  paymentId    String
+  accountId    String  // Target ledger account
+  walletId     String  // Target wallet
+  ratio        Decimal @db.Decimal(10, 6) // Split ratio (0.0000 - 1.000000)
+  amount       Decimal @db.Decimal(19, 4) // Computed split amount
+  currency     String  @default("USD")
+  metadata     Json?
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([paymentId])
+  @@index([walletId])
+  @@map("payment_splits")
+}
+
+// =============================================================================
+// PAYOUTS DOMAIN
+// =============================================================================
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  SUBMITTED     // Sent to bank
+  SETTLED       // Bank confirmed
+  FAILED
+  RETURNED      // Bank returned (e.g. bad account)
+  CANCELLED
+}
+
+model Payout {
+  id              String       @id @default(uuid())
+  walletId        String
+  amount          Decimal      @db.Decimal(19, 4)
+  currency        String       @default("USD")
+  status          PayoutStatus @default(PENDING)
+  bankReference   String?      // Column bank transfer ID
+  bankAccountInfo Json?        // Destination account (encrypted in production)
+  failureReason   String?
+  metadata        Json?
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  submittedAt DateTime?
+  settledAt   DateTime?
+
+  @@index([walletId])
+  @@index([status])
+  @@map("payouts")
+}
+
+// =============================================================================
+// NET-0 CREDIT SYSTEM
+// =============================================================================
+
+enum CreditLineStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+model CreditLine {
+  id              String           @id @default(uuid())
+  walletId        String
+  maxAmount       Decimal          @db.Decimal(19, 4)
+  usedAmount      Decimal          @db.Decimal(19, 4) @default(0)
+  currency        String           @default("USD")
+  status          CreditLineStatus @default(ACTIVE)
+  interestRate    Decimal          @db.Decimal(5, 4)  @default(0)
+  metadata        Json?
+
+  wallet Wallet        @relation(fields: [walletId], references: [id])
+  usages CreditUsage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([walletId, currency])
+  @@index([status])
+  @@map("credit_lines")
+}
+
+enum CreditUsageType {
+  ADVANCE       // Early payout before settlement
+  REPAYMENT     // Auto-repayment when actual payment arrives
+  ADJUSTMENT    // Manual adjustment
+  WRITE_OFF     // Bad debt write-off
+}
+
+model CreditUsage {
+  id           String          @id @default(uuid())
+  creditLineId String
+  type         CreditUsageType
+  amount       Decimal         @db.Decimal(19, 4)
+  referenceId  String          // Payment or payout that triggered this
+  description  String?
+  metadata     Json?
+
+  creditLine CreditLine @relation(fields: [creditLineId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([creditLineId])
+  @@index([referenceId])
+  @@map("credit_usages")
+}
+
+// =============================================================================
+// RISK ASSESSMENT
+// =============================================================================
+
+enum RiskDecision {
+  APPROVE
+  PARTIAL
+  REJECT
+}
+
+model RiskAssessment {
+  id           String       @id @default(uuid())
+  walletId     String
+  score        Int          // 0-100
+  decision     RiskDecision
+  factors      Json         // Detailed scoring breakdown
+  requestedAmount Decimal   @db.Decimal(19, 4)
+  approvedAmount  Decimal?  @db.Decimal(19, 4)
+  metadata     Json?
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([walletId])
+  @@index([decision])
+  @@map("risk_assessments")
+}
+
+// =============================================================================
+// RECONCILIATION
+// =============================================================================
+
+enum ReconciliationStatus {
+  MATCHED
+  MISMATCHED
+  PENDING
+  MANUAL_REVIEW
+}
+
+model Reconciliation {
+  id              String               @id @default(uuid())
+  entityType      String               // "payment", "payout"
+  entityId        String
+  expectedAmount  Decimal              @db.Decimal(19, 4)
+  actualAmount    Decimal?             @db.Decimal(19, 4)
+  status          ReconciliationStatus @default(PENDING)
+  discrepancy     Decimal?             @db.Decimal(19, 4)
+  notes           String?
+  metadata        Json?
+
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([entityType, entityId])
+  @@index([status])
+  @@map("reconciliations")
+}
+
+// =============================================================================
+// IDEMPOTENCY
+// =============================================================================
+
+model IdempotencyKey {
+  id         String   @id @default(uuid())
+  key        String   @unique
+  method     String   // HTTP method
+  path       String   // API endpoint
+  statusCode Int?
+  response   Json?
+  expiresAt  DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
