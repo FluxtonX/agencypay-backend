@@ -1,0 +1,93 @@
+name: Deploy AgncyPay Backend
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:  # Allow manual triggers
+
+jobs:
+  build-and-test:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: agencypay-backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: agencypay-backend
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: agencypay-backend
+        run: npx prisma generate
+
+      - name: Build application
+        working-directory: agencypay-backend
+        run: npm run build
+
+      - name: Run linter
+        working-directory: agencypay-backend
+        run: npm run lint
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+
+            echo "========================================="
+            echo "  AgncyPay Deployment — $(date)"
+            echo "========================================="
+
+            cd ${{ secrets.EC2_DEPLOY_PATH }}
+
+            echo "[1/6] Pulling latest code..."
+            git pull origin main
+
+            echo "[2/6] Installing dependencies..."
+            npm ci --production=false
+
+            echo "[3/6] Generating Prisma client..."
+            npx prisma generate
+
+            echo "[4/6] Running database migrations..."
+            npx prisma migrate deploy
+
+            echo "[5/6] Building application..."
+            npm run build
+
+            echo "[6/6] Reloading application (zero-downtime)..."
+            pm2 reload agncypay-backend --update-env
+
+            echo "========================================="
+            echo "  Deployment complete!"
+            echo "========================================="
+
+            # Post-deploy health check
+            sleep 3
+            curl -sf http://localhost:3000/api/v1/health || {
+              echo "HEALTH CHECK FAILED — rolling back..."
+              pm2 logs agncypay-backend --lines 50 --nostream
+              exit 1
+            }
+
+            echo "Health check passed ✅"

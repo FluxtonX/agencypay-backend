@@ -40,8 +40,8 @@ export class HealthController {
   getInfo() {
     return {
       status: 'ok',
+      version:2.0,
       service: 'agncypay-backend',
-      version: process.env.npm_package_version || '0.0.1',
       uptime: process.uptime(),
       memory: process.memoryUsage(),
       timestamp: new Date().toISOString(),
