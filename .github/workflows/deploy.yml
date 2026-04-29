@@ -3,12 +3,16 @@ name: Deploy AgncyPay Backend
 on:
   push:
     branches: [develop]
-  workflow_dispatch:  # Allow manual triggers
+  workflow_dispatch:
 
 jobs:
   build-and-test:
     name: Build & Validate
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: agencypay-backend   # ✅ APPLY EVERYWHERE
 
     steps:
       - name: Checkout code
@@ -19,22 +23,18 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: agencypay-backend/package-lock.json
+          cache-dependency-path: agencypay-backend/package-lock.json  # ✅ FIXED
 
       - name: Install dependencies
-        working-directory: agencypay-backend
         run: npm ci
 
       - name: Generate Prisma client
-        working-directory: agencypay-backend
         run: npx prisma generate
 
       - name: Build application
-        working-directory: agencypay-backend
         run: npm run build
 
       - name: Run linter
-        working-directory: agencypay-backend
         run: npm run lint
 
   deploy:
@@ -61,10 +61,10 @@ jobs:
             cd ${{ secrets.EC2_DEPLOY_PATH }}
 
             echo "[1/6] Pulling latest code..."
-            git pull origin main
+            git pull origin develop   # ✅ FIXED (was main)
 
             echo "[2/6] Installing dependencies..."
-            npm ci --production=false
+            npm ci
 
             echo "[3/6] Generating Prisma client..."
             npx prisma generate
@@ -75,19 +75,19 @@ jobs:
             echo "[5/6] Building application..."
             npm run build
 
-            echo "[6/6] Reloading application (zero-downtime)..."
-            pm2 reload agncypay-backend --update-env
+            echo "[6/6] Reloading application..."
+            pm2 reload agencypay-backend --update-env   # ✅ FIXED name
 
             echo "========================================="
             echo "  Deployment complete!"
             echo "========================================="
 
-            # Post-deploy health check
             sleep 3
             curl -sf http://localhost:3000/api/v1/health || {
               echo "HEALTH CHECK FAILED — rolling back..."
-              pm2 logs agncypay-backend --lines 50 --nostream
+              pm2 logs agencypay-backend --lines 50 --nostream
               exit 1
             }
 
             echo "Health check passed ✅"
+            
