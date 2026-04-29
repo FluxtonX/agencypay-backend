@@ -10,9 +10,6 @@ jobs:
     name: Build & Validate
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: agencypay-backend   # ✅ APPLY EVERYWHERE
 
     steps:
       - name: Checkout code
@@ -26,15 +23,19 @@ jobs:
           cache-dependency-path: package-lock.json  # ✅ FIXED
 
       - name: Install dependencies
+        working-directory: ./agencypay-backend
         run: npm ci
 
       - name: Generate Prisma client
+        working-directory: ./agencypay-backend
         run: npx prisma generate
 
       - name: Build application
+        working-directory: ./agencypay-backend
         run: npm run build
 
       - name: Run linter
+        working-directory: ./agencypay-backend
         run: npm run lint
 
   deploy:
