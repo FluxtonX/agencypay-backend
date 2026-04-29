@@ -3,6 +3,10 @@ import { defineConfig } from 'prisma/config';
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',
+  datasource: {
+    url: process.env.DATABASE_URL,
+  },
+  // @ts-ignore — Prisma v7 migrate adapter (type defs lag behind runtime)
   migrate: {
     async adapter() {
       const { Pool } = await import('pg');

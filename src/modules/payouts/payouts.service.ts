@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service.js';
-import { LedgerService } from '../ledger/ledger.service.js';
+import { LedgerService, type DbClient } from '../ledger/ledger.service.js';
 import { ColumnBankAdapter } from '../../integrations/column/column.service.js';
 import { IdempotencyService } from '../../common/utils/idempotency.service.js';
 import { Money } from '../../common/utils/money.util.js';
@@ -31,12 +31,20 @@ export class PayoutsService {
   /**
    * Initiate a payout (withdrawal) from a wallet.
    *
+   * DOUBLE-SPEND PREVENTION:
+   * Balance check uses SELECT FOR UPDATE to acquire a row-level lock on the
+   * PAYABLE account. Any concurrent payout attempting the same account will
+   * BLOCK until this transaction commits or rolls back.
+   *
    * Flow:
-   * 1. Verify wallet has sufficient PAYABLE balance
-   * 2. Create Payout record
-   * 3. Post ledger entries: debit PAYABLE, credit SUSPENSE
-   * 4. Submit to bank (Column API)
-   * 5. On bank confirmation → move from SUSPENSE to final state
+   * 1. Idempotency check
+   * 2. ATOMIC TRANSACTION:
+   *    a. Lock PAYABLE account (SELECT FOR UPDATE)
+   *    b. Verify sufficient balance
+   *    c. Create Payout record
+   *    d. Post ledger entries: debit PAYABLE, credit SUSPENSE
+   * 3. Submit to bank (Column API) — outside DB transaction
+   * 4. Update payout with bank reference
    */
   async initiatePayout(
     dto: InitiatePayoutDto,
@@ -56,96 +64,121 @@ export class PayoutsService {
     const currency = dto.currency || 'USD';
     const amount = new Decimal(dto.amount);
 
-    // 1. Verify balance
-    const payableAccount = await this.ledgerService.getAccountByType(
-      dto.walletId,
-      'PAYABLE',
-      currency,
-    );
+    // ATOMIC: Lock + balance check + payout creation + ledger posting
+    let payout: Payout;
+    try {
+      payout = await this.prisma.$transaction(async (tx) => {
+        const txClient = tx as unknown as DbClient;
 
-    if (!payableAccount) {
-      await this.idempotencyService.remove(idempotencyKey);
-      throw new BadRequestException(
-        `Wallet ${dto.walletId} has no PAYABLE account`,
-      );
-    }
-
-    const balance = await this.ledgerService.computeBalanceFromLedger(
-      payableAccount.id,
-    );
-
-    // PAYABLE balance is negative (credit side) — the absolute value is what's available
-    const availableBalance = balance.abs();
-
-    if (Money.greaterThan(amount, availableBalance)) {
-      await this.idempotencyService.remove(idempotencyKey);
-      throw new BadRequestException(
-        `Insufficient balance. Available: ${availableBalance.toFixed(4)}, Requested: ${amount.toFixed(4)}`,
-      );
-    }
-
-    // 2. Get SUSPENSE account for hold during bank transfer
-    const suspenseAccount = await this.ledgerService.getAccountByType(
-      dto.walletId,
-      'SUSPENSE',
-      currency,
-    );
-
-    if (!suspenseAccount) {
-      // Auto-create suspense if missing
-      await this.prisma.account.create({
-        data: {
-          walletId: dto.walletId,
-          type: 'SUSPENSE',
+        // 1. Get PAYABLE account
+        const payableAccount = await this.ledgerService.getAccountByType(
+          dto.walletId,
+          'PAYABLE',
           currency,
-        },
-      });
-    }
+          txClient,
+        );
 
-    const suspenseAcct =
-      suspenseAccount ||
-      (await this.ledgerService.getAccountByType(
-        dto.walletId,
-        'SUSPENSE',
-        currency,
-      ))!;
+        if (!payableAccount) {
+          throw new BadRequestException(
+            `Wallet ${dto.walletId} has no PAYABLE account`,
+          );
+        }
 
-    // 3. Create Payout record
-    const payout = await this.prisma.payout.create({
-      data: {
+        // 2. LOCK the account row — prevents concurrent payouts from reading stale balance
+        await this.ledgerService.lockAccountForUpdate(payableAccount.id, txClient);
+
+        // 3. Compute balance AFTER acquiring lock (guaranteed to be current)
+        const balance = await this.ledgerService.computeBalanceFromLedger(
+          payableAccount.id,
+          undefined,
+          txClient,
+        );
+
+        // PAYABLE balance is negative (credit side) — the absolute value is available
+        const availableBalance = balance.abs();
+
+        if (Money.greaterThan(amount, availableBalance)) {
+          throw new BadRequestException(
+            `Insufficient balance. Available: ${availableBalance.toFixed(4)}, Requested: ${amount.toFixed(4)}`,
+          );
+        }
+
+        // 4. Get/create SUSPENSE account
+        let suspenseAccount = await this.ledgerService.getAccountByType(
+          dto.walletId,
+          'SUSPENSE',
+          currency,
+          txClient,
+        );
+
+        if (!suspenseAccount) {
+          suspenseAccount = await (tx as any).account.create({
+            data: {
+              walletId: dto.walletId,
+              type: 'SUSPENSE',
+              currency,
+            },
+          });
+        }
+
+        // 5. Create Payout record
+        const newPayout = await tx.payout.create({
+          data: {
+            walletId: dto.walletId,
+            amount: dto.amount,
+            currency,
+            status: 'PROCESSING',
+            bankAccountInfo: (dto.bankAccountInfo ?? undefined) as any,
+            metadata: (dto.metadata ?? undefined) as any,
+          },
+        });
+
+        // 6. Post ledger: reduce PAYABLE, move to SUSPENSE (within same tx)
+        await this.ledgerService.postTransaction(
+          {
+            referenceId: newPayout.id,
+            referenceType: 'payout',
+            type: 'PAYOUT_INITIATED',
+            description: `Payout initiated: ${dto.amount} ${currency}`,
+            entries: [
+              {
+                accountId: payableAccount.id,
+                amount: dto.amount, // Debit PAYABLE (reduce what's owed)
+                currency,
+                description: 'Payout from payable balance',
+              },
+              {
+                accountId: suspenseAccount!.id,
+                amount: Money.negate(dto.amount).toFixed(4), // Credit SUSPENSE (hold)
+                currency,
+                description: 'Payout held in suspense',
+              },
+            ],
+          },
+          txClient,
+        );
+
+        return newPayout;
+      }); // Transaction commits here — lock is released
+    } catch (error) {
+      await this.idempotencyService.remove(idempotencyKey);
+
+      this.eventEmitter.emit(AgncyPayEvent.PAYOUT_FAILED, {
+        eventId: uuidv4(),
+        timestamp: new Date().toISOString(),
+        source: 'PayoutsService',
+        payoutId: 'unknown',
         walletId: dto.walletId,
         amount: dto.amount,
         currency,
-        status: 'PROCESSING',
-        bankAccountInfo: (dto.bankAccountInfo ?? undefined) as any,
-        metadata: (dto.metadata ?? undefined) as any,
-      },
-    });
-
-    try {
-      // 4. Post ledger: reduce PAYABLE, move to SUSPENSE
-      await this.ledgerService.postTransaction({
-        referenceId: payout.id,
-        referenceType: 'payout',
-        type: 'PAYOUT_INITIATED',
-        description: `Payout initiated: ${dto.amount} ${currency}`,
-        entries: [
-          {
-            accountId: payableAccount.id,
-            amount: dto.amount, // Debit PAYABLE (reduce what's owed)
-            currency,
-            description: 'Payout from payable balance',
-          },
-          {
-            accountId: suspenseAcct.id,
-            amount: Money.negate(dto.amount).toFixed(4), // Credit SUSPENSE (hold)
-            currency,
-            description: 'Payout held in suspense',
-          },
-        ],
+        error: error instanceof Error ? error.message : String(error),
       });
 
-      // 5. Submit to bank
+      throw error;
+    }
+
+    // 7. Submit to bank (OUTSIDE db transaction — external side effect)
+    try {
       const bankResult = await this.columnAdapter.initiateACHTransfer({
         payoutId: payout.id,
         amount: dto.amount,
@@ -153,7 +186,19 @@ export class PayoutsService {
         bankAccountInfo: dto.bankAccountInfo || {},
       });
 
-      // 6. Update payout with bank reference
+      // CHECK bank response status (P0 fix — previously ignored 'failed' status)
+      if (bankResult.status === 'failed') {
+        // Bank rejected — reverse the ledger entries
+        await this._handleBankRejection(payout, currency);
+
+        await this.idempotencyService.remove(idempotencyKey);
+
+        throw new BadRequestException(
+          `Bank rejected payout ${payout.id}. The ledger has been reversed.`,
+        );
+      }
+
+      // 8. Update payout with bank reference
       const submittedPayout = await this.prisma.payout.update({
         where: { id: payout.id },
         data: {
@@ -183,7 +228,14 @@ export class PayoutsService {
 
       return submittedPayout;
     } catch (error) {
-      // Roll back: mark payout as failed, release idempotency key
+      // If it's our own BadRequestException from bank rejection, re-throw
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      // Bank API failure (network error, timeout, etc.) — reverse ledger
+      await this._handleBankRejection(payout, currency);
+
       await this.prisma.payout.update({
         where: { id: payout.id },
         data: {
@@ -207,6 +259,44 @@ export class PayoutsService {
 
       throw error;
     }
+  }
+
+  /**
+   * Reverse the PAYABLE→SUSPENSE ledger entries when bank rejects or fails.
+   * Moves funds back from SUSPENSE to PAYABLE.
+   */
+  private async _handleBankRejection(
+    payout: Payout,
+    currency: string,
+  ): Promise<void> {
+    const transactions = await this.ledgerService.getTransactionsByReference(
+      payout.id,
+      'payout',
+    );
+
+    const initiationTx = transactions.find(
+      (t) => t.status === 'POSTED' && t.type === 'PAYOUT_INITIATED',
+    );
+
+    if (initiationTx) {
+      await this.ledgerService.reverseTransaction(
+        initiationTx.id,
+        'Bank rejected or failed — returning funds to PAYABLE',
+        'ADJUSTMENT',
+      );
+    }
+
+    await this.prisma.payout.update({
+      where: { id: payout.id },
+      data: {
+        status: 'FAILED',
+        failureReason: 'Bank rejected transfer',
+      },
+    });
+
+    this.logger.warn(
+      `Payout ${payout.id} reversed after bank rejection`,
+    );
   }
 
   /**

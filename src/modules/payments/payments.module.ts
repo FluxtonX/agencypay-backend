@@ -5,6 +5,7 @@ import { CreditController } from './credit.controller.js';
 import { SplitEngine } from './orchestrator/split-engine.service.js';
 import { CreditEngine } from './orchestrator/credit-engine.service.js';
 import { RiskAssessmentService } from './orchestrator/risk-assessment.service.js';
+import { IdempotencyService } from '../../common/utils/idempotency.service.js';
 import { LedgerModule } from '../ledger/ledger.module.js';
 
 @Module({
@@ -15,7 +16,9 @@ import { LedgerModule } from '../ledger/ledger.module.js';
     SplitEngine,
     CreditEngine,
     RiskAssessmentService,
+    IdempotencyService,
   ],
   exports: [PaymentsService, SplitEngine, CreditEngine, RiskAssessmentService],
 })
 export class PaymentsModule {}
+

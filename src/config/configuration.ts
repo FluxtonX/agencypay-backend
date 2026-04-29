@@ -36,4 +36,8 @@ export default () => ({
   idempotency: {
     ttlSeconds: parseInt(process.env.IDEMPOTENCY_TTL_SECONDS || '86400', 10), // 24h
   },
+  auth: {
+    jwtSecret: process.env.JWT_SECRET || 'agncypay-dev-secret-change-in-production',
+    jwtExpiry: process.env.JWT_EXPIRY || '1h',
+  },
 });

@@ -1,12 +1,21 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { APP_GUARD } from '@nestjs/core';
 
 // Configuration
 import configuration from './config/configuration.js';
 
 // Database
 import { DatabaseModule } from './database/database.module.js';
+
+// Auth & Guards
+import { AuthModule } from './modules/auth/auth.module.js';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
+import { RolesGuard } from './common/guards/roles.guard.js';
+
+// Health
+import { HealthModule } from './modules/health/health.module.js';
 
 // Domain Modules
 import { LedgerModule } from './modules/ledger/ledger.module.js';
@@ -40,6 +49,12 @@ import { ColumnModule } from './integrations/column/column.module.js';
     // Database (global)
     DatabaseModule,
 
+    // Authentication
+    AuthModule,
+
+    // Health checks
+    HealthModule,
+
     // Core domain modules
     LedgerModule,
     WalletModule,
@@ -57,5 +72,18 @@ import { ColumnModule } from './integrations/column/column.module.js';
     QuickBooksModule,
     ColumnModule,
   ],
+  providers: [
+    // Global JWT guard — all routes require auth unless @Public()
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    // Global RBAC guard — checks @Roles() decorator if present
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
+    },
+  ],
 })
 export class AppModule {}
+

@@ -7,10 +7,12 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Public } from '../../common/decorators/public.decorator.js';
 import { QuickBooksService } from '../../integrations/quickbooks/quickbooks.service.js';
 import type { QuickBooksWebhookEvent } from '../../integrations/quickbooks/quickbooks.service.js';
 
 @Controller('webhooks')
+@Public() // Webhooks use signature verification, not JWT
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);
 

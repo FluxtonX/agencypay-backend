@@ -121,24 +121,31 @@ enum TransactionType {
 }
 
 model LedgerTransaction {
-  id            String            @id @default(uuid())
-  referenceId   String            // External reference (payment ID, payout ID, etc.)
+  id             String            @id @default(uuid())
+  sequenceNumber Int               @default(autoincrement()) @unique // Monotonic for gap detection & replay
+  referenceId    String            // External reference (payment ID, payout ID, etc.)
   referenceType String            // "payment", "payout", "credit", etc.
   type          TransactionType
   status        TransactionStatus @default(PENDING)
   description   String?
   metadata      Json?
 
+  // Immutability: NO updatedAt — ledger transactions are append-only.
+  // Reversals are linked via originalTransactionId, original stays POSTED forever.
+  originalTransactionId String?
+  originalTransaction   LedgerTransaction?  @relation("TransactionReversal", fields: [originalTransactionId], references: [id])
+  reversals             LedgerTransaction[] @relation("TransactionReversal")
+
   entries LedgerEntry[]
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
   postedAt  DateTime?
 
   @@index([referenceId, referenceType])
   @@index([type])
   @@index([status])
   @@index([createdAt])
+  @@index([originalTransactionId])
   @@map("ledger_transactions")
 }
 

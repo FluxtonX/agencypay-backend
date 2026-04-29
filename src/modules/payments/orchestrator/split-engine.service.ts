@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service.js';
-import { LedgerService } from '../../ledger/ledger.service.js';
+import { LedgerService, type DbClient } from '../../ledger/ledger.service.js';
 import { Money } from '../../../common/utils/money.util.js';
 import type { SplitInvoiceDto, SplitResult } from '../dto/split.dto.js';
 import type { LedgerEntryDto } from '../../ledger/dto/ledger.dto.js';
@@ -44,10 +44,13 @@ export class SplitEngine {
    * - Platform FEE: -25  (credit to platform fee account)
    * - Wallet A PAYABLE: -682.50
    * - Wallet B PAYABLE: -292.50
+   *
+   * @param tx  Optional Prisma transaction client for atomic cross-service ops.
    */
   async computeSplitEntries(
     dto: SplitInvoiceDto,
     actualPaymentAmount?: string,
+    tx?: DbClient,
   ): Promise<LedgerEntryDto[]> {
     // 1. Validate ratios sum to 1
     const ratios = dto.participants.map((p) => new Decimal(p.ratio));
@@ -82,6 +85,7 @@ export class SplitEngine {
       dto.payerWalletId,
       'CASH',
       dto.currency,
+      tx,
     );
 
     if (!payerCashAccount) {
@@ -114,6 +118,7 @@ export class SplitEngine {
         dto.platformWalletId,
         'FEE',
         dto.currency,
+        tx,
       );
 
       if (!platformFeeAccount) {
@@ -147,6 +152,7 @@ export class SplitEngine {
         participant.walletId,
         'PAYABLE',
         dto.currency,
+        tx,
       );
 
       if (!payableAccount) {
@@ -183,7 +189,8 @@ export class SplitEngine {
   async computePartialSplitEntries(
     dto: SplitInvoiceDto,
     partialAmount: string,
+    tx?: DbClient,
   ): Promise<LedgerEntryDto[]> {
-    return this.computeSplitEntries(dto, partialAmount);
+    return this.computeSplitEntries(dto, partialAmount, tx);
   }
 }

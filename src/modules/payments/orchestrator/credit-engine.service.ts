@@ -47,6 +47,30 @@ export class CreditEngine {
   ) {}
 
   /**
+   * Derive usedAmount from CreditUsage entries — NEVER trust the stored counter.
+   * SUM(ADVANCE amounts) - SUM(REPAYMENT amounts) = actual exposure.
+   */
+  private async computeUsedAmount(creditLineId: string): Promise<Decimal> {
+    const usages = await this.prisma.creditUsage.findMany({
+      where: { creditLineId },
+      select: { type: true, amount: true },
+    });
+
+    let used = Money.ZERO;
+    for (const usage of usages) {
+      const amount = new Decimal(usage.amount.toString());
+      if (usage.type === 'ADVANCE') {
+        used = used.plus(amount);
+      } else if (usage.type === 'REPAYMENT') {
+        used = used.minus(amount);
+      }
+    }
+
+    // Clamp to zero — should never be negative, but safety check
+    return used.isNegative() ? Money.ZERO : used;
+  }
+
+  /**
    * Request a credit advance (early payout before settlement).
    */
   async requestCreditAdvance(
@@ -128,10 +152,11 @@ export class CreditEngine {
       });
     }
 
-    // 3. Check available credit
+    // 3. Check available credit — DERIVED from entries, not stored counter
+    const computedUsed = await this.computeUsedAmount(creditLine.id);
     const available = Money.subtract(
       creditLine.maxAmount.toString(),
-      creditLine.usedAmount.toString(),
+      computedUsed.toString(),
     );
 
     const effectiveAmount = Money.min(
@@ -197,16 +222,8 @@ export class CreditEngine {
       },
     });
 
-    // 7. Update credit line usage
-    const updatedCreditLine = await this.prisma.creditLine.update({
-      where: { id: creditLine.id },
-      data: {
-        usedAmount: Money.add(
-          creditLine.usedAmount.toString(),
-          effectiveAmount.toString(),
-        ).toFixed(4),
-      },
-    });
+    // 7. Recompute usedAmount from entries for event emission (no stored counter mutation)
+    const newUsed = await this.computeUsedAmount(creditLine.id);
 
     this.eventEmitter.emit(AgncyPayEvent.CREDIT_APPLIED, {
       eventId: uuidv4(),
@@ -215,17 +232,17 @@ export class CreditEngine {
       creditLineId: creditLine.id,
       walletId,
       amount: effectiveAmount.toFixed(4),
-      usedAmount: updatedCreditLine.usedAmount.toString(),
-      maxAmount: updatedCreditLine.maxAmount.toString(),
+      usedAmount: newUsed.toFixed(4),
+      maxAmount: creditLine.maxAmount.toString(),
     });
 
     this.logger.log(
       `Credit advance: ${effectiveAmount.toFixed(4)} ${currency} for wallet ${walletId} ` +
-        `(used: ${updatedCreditLine.usedAmount}/${updatedCreditLine.maxAmount})`,
+        `(used: ${newUsed.toFixed(4)}/${creditLine.maxAmount})`,
     );
 
     return {
-      creditLine: updatedCreditLine,
+      creditLine,
       usage,
       ledgerTransactionId: ledgerTx.id,
     };
@@ -250,14 +267,21 @@ export class CreditEngine {
       },
     });
 
-    if (!creditLine || Money.isZero(creditLine.usedAmount.toString())) {
-      return null; // No credit to reconcile
+    if (!creditLine) {
+      return null; // No credit line exists
+    }
+
+    // Derive used amount from entries — not stored counter
+    const computedUsed = await this.computeUsedAmount(creditLine.id);
+
+    if (computedUsed.isZero()) {
+      return null; // No outstanding credit
     }
 
     // Repay the lesser of: payment amount or outstanding credit
     const repaymentAmount = Money.min(
       paymentAmount,
-      creditLine.usedAmount.toString(),
+      computedUsed.toString(),
     );
 
     if (Money.isZero(repaymentAmount.toString())) {
@@ -313,16 +337,7 @@ export class CreditEngine {
       },
     });
 
-    // Update credit line
-    await this.prisma.creditLine.update({
-      where: { id: creditLine.id },
-      data: {
-        usedAmount: Money.subtract(
-          creditLine.usedAmount.toString(),
-          repaymentAmount.toString(),
-        ).toFixed(4),
-      },
-    });
+    // No stored counter mutation — usedAmount is always derived from CreditUsage entries
 
     this.eventEmitter.emit(AgncyPayEvent.CREDIT_REPAID, {
       eventId: uuidv4(),
@@ -382,16 +397,26 @@ export class CreditEngine {
 
   /**
    * Get credit line details for a wallet.
+   * Includes computed usedAmount derived from CreditUsage entries.
    */
   async getCreditLine(
     walletId: string,
     currency: string = 'USD',
-  ): Promise<CreditLine | null> {
-    return this.prisma.creditLine.findUnique({
+  ): Promise<(CreditLine & { computedUsedAmount: string }) | null> {
+    const creditLine = await this.prisma.creditLine.findUnique({
       where: {
         walletId_currency: { walletId, currency },
       },
       include: { usages: { orderBy: { createdAt: 'desc' }, take: 20 } },
     });
+
+    if (!creditLine) return null;
+
+    const computedUsed = await this.computeUsedAmount(creditLine.id);
+
+    return {
+      ...creditLine,
+      computedUsedAmount: computedUsed.toFixed(4),
+    };
   }
 }
