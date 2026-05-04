@@ -25,6 +25,9 @@ import { PayoutsModule } from './modules/payouts/payouts.module.js';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module.js';
 import { EventsModule } from './modules/events/events.module.js';
 import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
+import { IngestionModule } from './modules/ingestion/ingestion.module.js';
+import { ComplianceModule } from './modules/compliance/compliance.module.js';
+import { OutboxModule } from './modules/outbox/outbox.module.js';
 
 // Integration Modules
 import { QuickBooksModule } from './integrations/quickbooks/quickbooks.module.js';
@@ -67,6 +70,15 @@ import { ColumnModule } from './integrations/column/column.module.js';
 
     // Webhook handlers
     WebhooksModule,
+
+    // Ingestion
+    IngestionModule,
+
+    // Compliance
+    ComplianceModule,
+
+    // Event Persistence
+    OutboxModule,
 
     // Integrations
     QuickBooksModule,

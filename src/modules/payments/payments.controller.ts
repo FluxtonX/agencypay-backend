@@ -5,13 +5,14 @@ import {
   Body,
   Param,
   Query,
-  Headers,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service.js';
-import type {
+import { IdempotencyKeyHeader } from '../../common/decorators/idempotency-key.decorator.js';
+import {
   IngestPaymentDto,
+  ListPaymentsByWalletQueryDto,
   RefundPaymentDto,
   ChargebackPaymentDto,
 } from './dto/payment.dto.js';
@@ -24,7 +25,7 @@ export class PaymentsController {
   @HttpCode(HttpStatus.CREATED)
   async ingestPayment(
     @Body() dto: IngestPaymentDto,
-    @Headers('idempotency-key') idempotencyKey?: string,
+    @IdempotencyKeyHeader() idempotencyKey: string,
   ) {
     const payment = await this.paymentsService.ingestPayment(
       dto,
@@ -56,13 +57,12 @@ export class PaymentsController {
   @Get('wallet/:walletId')
   async listPaymentsByWallet(
     @Param('walletId') walletId: string,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query() query: ListPaymentsByWalletQueryDto,
   ) {
     const payments = await this.paymentsService.listPaymentsByWallet(
       walletId,
-      limit ? parseInt(limit, 10) : 20,
-      offset ? parseInt(offset, 10) : 0,
+      query.limit ?? 20,
+      query.offset ?? 0,
     );
     return { success: true, data: payments };
   }

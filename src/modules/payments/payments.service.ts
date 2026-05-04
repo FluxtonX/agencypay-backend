@@ -16,7 +16,7 @@ import type { IngestPaymentDto, RefundPaymentDto, ChargebackPaymentDto } from '.
 import type { SplitInvoiceDto } from './dto/split.dto.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { Payment, PaymentSplit } from '@prisma/client';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 @Injectable()
 export class PaymentsService {

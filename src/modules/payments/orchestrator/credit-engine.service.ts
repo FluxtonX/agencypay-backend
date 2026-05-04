@@ -13,7 +13,7 @@ import { AgncyPayEvent } from '../../../common/constants/events.js';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
 import type { CreditLine, CreditUsage } from '@prisma/client';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 export interface CreditAdvanceResult {
   creditLine: CreditLine;

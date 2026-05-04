@@ -9,7 +9,7 @@ import { AgncyPayEvent } from '../../common/constants/events.js';
 import { Money } from '../../common/utils/money.util.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { Reconciliation, ReconciliationStatus } from '@prisma/client';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 /**
  * ReconciliationService — Validates consistency between expected and actual state.

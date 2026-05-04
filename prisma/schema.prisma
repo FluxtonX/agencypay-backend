@@ -39,6 +39,7 @@ model Wallet {
   externalAccounts ExternalAccount[]
   creditLines      CreditLine[]
   riskAssessments  RiskAssessment[]
+  invoices         Invoice[]
   payments         Payment[]
   payouts          Payout[]
 
@@ -170,6 +171,58 @@ model LedgerEntry {
 }
 
 // =============================================================================
+// INVOICE DOMAIN (New in Phase 2)
+// =============================================================================
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+model Invoice {
+  id              String        @id @default(uuid())
+  walletId        String
+  externalId      String?       // QuickBooks Invoice ID
+  invoiceNumber   String
+  amount          Decimal       @db.Decimal(19, 4)
+  currency        String        @default("USD")
+  status          InvoiceStatus @default(OPEN)
+  dueDate         DateTime?
+  metadata        Json?
+
+  wallet          Wallet        @relation(fields: [walletId], references: [id])
+  lineItems       InvoiceLineItem[]
+  payments        Payment[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([walletId, externalId])
+  @@index([walletId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  description String?
+  amount      Decimal  @db.Decimal(19, 4)
+  quantity    Decimal  @db.Decimal(19, 4) @default(1)
+  metadata    Json?
+
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+// =============================================================================
 // PAYMENTS DOMAIN
 // =============================================================================
 
@@ -197,8 +250,9 @@ model Payment {
   amount            Decimal       @db.Decimal(19, 4)
   currency          String        @default("USD")
   status            PaymentStatus @default(PENDING)
-  invoiceId         String?       // External invoice reference
-  invoiceData       Json?         // Normalized invoice snapshot
+  invoiceId         String?       // Internal reference to Invoice model
+  invoice           Invoice?      @relation(fields: [invoiceId], references: [id])
+  invoiceData       Json?         // Normalized invoice snapshot (legacy/cache)
   splitConfig       Json?         // Split ratios/participants
   settledAmount     Decimal?      @db.Decimal(19, 4)
   description       String?
@@ -407,4 +461,53 @@ model IdempotencyKey {
   @@index([key])
   @@index([expiresAt])
   @@map("idempotency_keys")
+}
+
+// =============================================================================
+// EVENT SYSTEM (Transactional Outbox)
+// =============================================================================
+
+enum EventStatus {
+  PENDING
+  DISPATCHED
+  FAILED
+  DEAD_LETTER
+}
+
+model OutboxEvent {
+  id            String      @id @default(uuid())
+  eventName     String      // e.g. "payment.settled"
+  aggregateType String      // e.g. "payment"
+  aggregateId   String      // The ID of the related entity
+  payload       Json        // The event data
+  status        EventStatus @default(PENDING)
+  attempts      Int         @default(0)
+  nextAttemptAt DateTime?
+  
+  deliveries    EventDelivery[]
+
+  createdAt    DateTime  @default(now())
+  dispatchedAt DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([aggregateType, aggregateId])
+  @@map("outbox_events")
+}
+
+model EventDelivery {
+  id            String  @id @default(uuid())
+  outboxEventId String
+  consumerName  String  // e.g. "PaymentSettledConsumer"
+  status        String  // "PENDING", "COMPLETED", "FAILED"
+  attempts      Int     @default(0)
+  lastError     String?
+
+  event OutboxEvent @relation(fields: [outboxEventId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([outboxEventId, consumerName])
+  @@index([outboxEventId])
+  @@map("event_deliveries")
 }

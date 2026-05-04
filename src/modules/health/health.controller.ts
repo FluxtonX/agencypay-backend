@@ -1,20 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
-import {
-  HealthCheckService,
-  HealthCheck,
-  HealthCheckResult,
-  PrismaHealthIndicator,
-} from '@nestjs/terminus';
+import { HealthCheck, HealthCheckResult } from '@nestjs/terminus';
 import { Public } from '../../common/decorators/public.decorator.js';
-import { PrismaService } from '../../database/prisma.service.js';
+import { HealthInfoDto } from './dto/health-info.dto.js';
+import { HealthService } from './health.service.js';
 
 @Controller('health')
 export class HealthController {
-  constructor(
-    private health: HealthCheckService,
-    private prismaHealth: PrismaHealthIndicator,
-    private prisma: PrismaService,
-  ) {}
+  constructor(private readonly healthService: HealthService) {}
 
   /**
    * GET /api/v1/health
@@ -25,9 +17,7 @@ export class HealthController {
   @Public()
   @HealthCheck()
   async check(): Promise<HealthCheckResult> {
-    return this.health.check([
-      () => this.prismaHealth.pingCheck('database', this.prisma),
-    ]);
+    return this.healthService.checkReadiness();
   }
 
   /**
@@ -37,14 +27,7 @@ export class HealthController {
    */
   @Get('info')
   @Public()
-  getInfo() {
-    return {
-      status: 'ok',
-      version:2.0,
-      service: 'agncypay-backend',
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      timestamp: new Date().toISOString(),
-    };
+  getInfo(): HealthInfoDto {
+    return this.healthService.getInfo();
   }
 }

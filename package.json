@@ -2,9 +2,13 @@
   "name": "agencypay-backend",
   "version": "0.0.1",
   "description": "",
+  "type": "module",
   "author": "",
   "private": true,
   "license": "UNLICENSED",
+  "prisma": {
+    "seed": "node --loader ts-node/esm prisma/seed.ts"
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -80,12 +84,23 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "useESM": true
+        }
+      ]
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
+    "moduleNameMapper": {
+      "^(\\.\\.?/.*)\\.js$": "$1"
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(uuid)/)"
+    ],
     "testEnvironment": "node"
   }
 }

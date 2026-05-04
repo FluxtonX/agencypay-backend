@@ -1,22 +1,66 @@
-import { IsString, IsOptional, IsObject, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsPositive,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
-import type { SplitParticipantDto } from './split.dto.js';
+
+class PaymentSplitParticipantDto {
+  @IsString()
+  walletId: string;
+
+  @IsString()
+  @Matches(/^(0(\.\d+)?|1(\.0+)?)$/)
+  ratio: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+}
+
+class PaymentSplitConfigDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PaymentSplitParticipantDto)
+  participants: PaymentSplitParticipantDto[];
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^(0(\.\d+)?|1(\.0+)?)$/)
+  platformFeeRatio?: string;
+
+  @IsOptional()
+  @IsString()
+  platformWalletId?: string;
+}
 
 export class IngestPaymentDto {
   @IsString()
-  externalId: string;
+  @IsOptional()
+  externalId?: string;
 
   @IsString()
+  @IsIn(['QUICKBOOKS', 'API', 'MANUAL'])
   source: 'QUICKBOOKS' | 'API' | 'MANUAL';
 
   @IsString()
   walletId: string;
 
   @IsString()
+  @Matches(/^(?!0+(\.0{1,4})?$)\d+(\.\d{1,4})?$/)
   amount: string;
 
   @IsOptional()
   @IsString()
+  @Matches(/^[A-Z]{3}$/)
   currency?: string;
 
   @IsOptional()
@@ -28,12 +72,9 @@ export class IngestPaymentDto {
   invoiceData?: Record<string, unknown>;
 
   @IsOptional()
-  @IsObject()
-  splitConfig?: {
-    participants: { walletId: string; ratio: string; description?: string }[];
-    platformFeeRatio?: string;
-    platformWalletId?: string;
-  };
+  @ValidateNested()
+  @Type(() => PaymentSplitConfigDto)
+  splitConfig?: PaymentSplitConfigDto;
 
   @IsOptional()
   @IsString()
@@ -50,6 +91,7 @@ export class RefundPaymentDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^(?!0+(\.0{1,4})?$)\d+(\.\d{1,4})?$/)
   amount?: string; // Partial refund amount; if absent, full refund
 
   @IsString()
@@ -65,5 +107,21 @@ export class ChargebackPaymentDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^(?!0+(\.0{1,4})?$)\d+(\.\d{1,4})?$/)
   amount?: string;
+}
+
+export class ListPaymentsByWalletQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsPositive()
+  @Max(100)
+  limit?: number = 20;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number = 0;
 }

@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { Money } from '../../../common/utils/money.util.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { RiskAssessment, RiskDecision } from '@prisma/client';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 interface RiskFactors {
   walletAge: { score: number; weight: number; detail: string };
