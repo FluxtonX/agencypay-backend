@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from '../../database/prisma.service.js';
 import { AgncyPayEvent } from '../../common/constants/events.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -61,6 +62,8 @@ export class QuickBooksService {
   constructor(
     private readonly config: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly authService: QuickBooksAuthService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -140,49 +143,70 @@ export class QuickBooksService {
     realmId: string,
     invoiceId: string,
   ): Promise<NormalizedInvoice> {
-    const baseUrl = this.config.get<string>('quickbooks.baseUrl');
-
-    // In production:
-    // const response = await fetch(
-    //   `${baseUrl}/v3/company/${realmId}/invoice/${invoiceId}?minorversion=65`,
-    //   {
-    //     headers: {
-    //       'Authorization': `Bearer ${accessToken}`,
-    //       'Accept': 'application/json',
-    //     },
-    //   },
-    // );
-    // const data = await response.json();
-
-    // MOCK: Return a simulated invoice
-    this.logger.log(
-      `[MOCK] Fetching invoice ${invoiceId} from realm ${realmId}`,
+    const baseUrl = this.config.get<string>(
+      'QUICKBOOKS_BASE_URL',
+      'https://sandbox-quickbooks.api.intuit.com',
     );
 
-    const mockInvoice: NormalizedInvoice = {
-      externalId: invoiceId,
-      invoiceNumber: `INV-${invoiceId}`,
-      customerId: `qb_customer_${Math.random().toString(36).slice(2, 8)}`,
-      customerName: 'Mock Customer',
-      amount: (Math.random() * 10000 + 100).toFixed(2),
-      currency: 'USD',
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'Open',
-      lineItems: [
-        {
-          description: 'Professional Services',
-          amount: (Math.random() * 5000 + 50).toFixed(2),
-          quantity: 1,
+    // 1. Resolve connection for this realm
+    const connection = await this.prisma.quickBooksConnection.findUnique({
+      where: { realmId },
+    });
+
+    if (!connection) {
+      this.logger.error(`No connection found for realmId: ${realmId}`);
+      throw new Error(`Connection not found for realm ${realmId}`);
+    }
+
+    // 2. Get valid access token
+    const accessToken = await this.authService.getValidToken(
+      connection.walletId,
+    );
+
+    // 3. Call QuickBooks API
+    this.logger.log(`Fetching invoice ${invoiceId} from QuickBooks`);
+    const response = await fetch(
+      `${baseUrl}/v3/company/${realmId}/invoice/${invoiceId}?minorversion=65`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
         },
-      ],
+      },
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      this.logger.error(
+        `Failed to fetch invoice from QuickBooks: ${JSON.stringify(data)}`,
+      );
+      throw new Error(`QuickBooks API error: ${response.statusText}`);
+    }
+
+    const qbInvoice = data.Invoice;
+
+    // 4. Normalize
+    return {
+      externalId: qbInvoice.Id,
+      invoiceNumber: qbInvoice.DocNumber,
+      customerId: qbInvoice.CustomerRef.value,
+      customerName: qbInvoice.CustomerRef.name,
+      amount: qbInvoice.TotalAmt.toString(),
+      currency: qbInvoice.CurrencyRef.value,
+      dueDate: qbInvoice.DueDate,
+      status: qbInvoice.EmailStatus, // or other status field
+      lineItems: qbInvoice.Line.filter((l: any) => l.DetailType === 'SalesItemLineDetail').map(
+        (line: any) => ({
+          description: line.Description,
+          amount: line.Amount.toString(),
+          quantity: line.SalesItemLineDetail?.Qty || 1,
+        }),
+      ),
       metadata: {
-        realmId,
-        fetchedAt: new Date().toISOString(),
-        source: 'quickbooks',
+        raw: qbInvoice,
       },
     };
-
-    return mockInvoice;
   }
 
   /**
