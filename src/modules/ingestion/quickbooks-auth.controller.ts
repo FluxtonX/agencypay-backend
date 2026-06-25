@@ -6,7 +6,7 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
-import { Response } from 'express';
+import type { Response } from 'express';
 import { QuickBooksAuthService } from '../../integrations/quickbooks/quickbooks-auth.service.js';
 import { Public } from '../../common/decorators/public.decorator.js';
 

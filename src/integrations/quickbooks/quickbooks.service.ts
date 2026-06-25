@@ -7,6 +7,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service.js';
 import { AgncyPayEvent } from '../../common/constants/events.js';
 import { v4 as uuidv4 } from 'uuid';
+import { QuickBooksAuthService } from './quickbooks-auth.service.js';
 
 /**
  * Normalized invoice structure from QuickBooks.

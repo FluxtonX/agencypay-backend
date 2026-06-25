@@ -17,9 +17,9 @@ export class QuickBooksAuthService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
   ) {
-    this.clientId = this.configService.get<string>('QUICKBOOKS_CLIENT_ID');
-    this.clientSecret = this.configService.get<string>('QUICKBOOKS_CLIENT_SECRET');
-    this.redirectUri = this.configService.get<string>('QUICKBOOKS_REDIRECT_URI');
+    this.clientId = this.configService.get<string>('QUICKBOOKS_CLIENT_ID', '');
+    this.clientSecret = this.configService.get<string>('QUICKBOOKS_CLIENT_SECRET', '');
+    this.redirectUri = this.configService.get<string>('QUICKBOOKS_REDIRECT_URI', '');
     this.environment = this.configService.get<string>('QUICKBOOKS_ENVIRONMENT', 'sandbox');
 
     this.authUrl = this.environment === 'production'
