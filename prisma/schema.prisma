@@ -42,6 +42,7 @@ model Wallet {
   invoices         Invoice[]
   payments         Payment[]
   payouts          Payout[]
+  user             User?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -49,6 +50,20 @@ model Wallet {
   @@index([type])
   @@index([status])
   @@map("wallets")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  role         String   // "brand" | "agency" | "talent"
+  walletId     String?  @unique @map("wallet_id")
+  wallet       Wallet?  @relation(fields: [walletId], references: [id])
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
 }
 
 model ExternalAccount {

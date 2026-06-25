@@ -31,6 +31,7 @@ import { OutboxModule } from './modules/outbox/outbox.module.js';
 
 // Integration Modules
 import { QuickBooksModule } from './integrations/quickbooks/quickbooks.module.js';
+import { PlaidModule } from './integrations/plaid/plaid.module.js';
 import { ColumnModule } from './integrations/column/column.module.js';
 
 @Module({
@@ -82,6 +83,7 @@ import { ColumnModule } from './integrations/column/column.module.js';
 
     // Integrations
     QuickBooksModule,
+    PlaidModule,
     ColumnModule,
   ],
   providers: [

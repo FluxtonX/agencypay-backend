@@ -466,4 +466,40 @@ export class PaymentsService {
       skip: offset,
     });
   }
+
+  /**
+   * List invoice payments (payments that have an invoiceId set) for a wallet.
+   * Used in the full invoices ledger page and clickable invoice rows.
+   */
+  async listInvoicesByWallet(
+    walletId: string,
+    limit: number = 20,
+    offset: number = 0,
+  ): Promise<Payment[]> {
+    return this.prisma.payment.findMany({
+      where: {
+        walletId,
+        invoiceId: { not: null },
+      },
+      include: { splits: true },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+    });
+  }
+
+  /**
+   * Dashboard preview — top 5 most recent invoice payments for a wallet.
+   * Optimised lightweight query for the dashboard widget.
+   */
+  async getDashboardInvoices(walletId: string): Promise<Payment[]> {
+    return this.prisma.payment.findMany({
+      where: {
+        walletId,
+        invoiceId: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+  }
 }
