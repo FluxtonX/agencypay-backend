@@ -10,7 +10,16 @@ export default () => ({
     baseUrl:
       process.env.QUICKBOOKS_BASE_URL ||
       'https://sandbox-quickbooks.api.intuit.com',
-    environment: process.env.QUICKBOOKS_ENV || 'sandbox',
+    environment: process.env.QUICKBOOKS_ENV || process.env.QUICKBOOKS_ENVIRONMENT || 'sandbox',
+    redirectUri:
+      process.env.QUICKBOOKS_REDIRECT_URI ||
+      'http://localhost:3000/api/auth/quickbooks/callback',
+  },
+  plaid: {
+    clientId: process.env.PLAID_CLIENT_ID || '',
+    secret: process.env.PLAID_SECRET || '',
+    env: process.env.PLAID_ENV || 'sandbox',
+    encryptionKey: process.env.ENCRYPTION_KEY || '',
   },
   column: {
     apiKey: process.env.COLUMN_API_KEY || '',
