@@ -4,6 +4,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgncyPayEvent } from '../../common/constants/events.js';
 import { TokenStorageService } from '../token-storage.service.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const OAuthClient = require('intuit-oauth');
 
@@ -18,6 +21,15 @@ export interface NormalizedInvoice {
   amount: number;
   status: string;
   daysText: string;
+  // Fields needed by ingestion:
+  externalId?: string;
+  invoiceNumber?: string;
+  customerId?: string;
+  customerName?: string;
+  currency?: string;
+  dueDate?: string;
+  metadata?: Record<string, any>;
+  lineItems?: Array<{ description?: string; amount: number; quantity?: number }>;
 }
 
 export interface NormalizedPayout {

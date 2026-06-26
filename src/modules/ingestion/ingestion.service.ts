@@ -21,7 +21,14 @@ export class IngestionService {
    * 3. Return the processed Invoice.
    */
   async ingestQuickBooksInvoice(qbInvoice: NormalizedInvoice, realmId: string) {
-    this.logger.log(`Ingesting QB invoice: ${qbInvoice.invoiceNumber} (Realm: ${realmId})`);
+    if (!qbInvoice.customerId) {
+      throw new Error('QuickBooks invoice is missing customerId');
+    }
+    if (!qbInvoice.externalId) {
+      throw new Error('QuickBooks invoice is missing externalId');
+    }
+
+    this.logger.log(`Ingesting QB invoice: ${qbInvoice.invoiceNumber || qbInvoice.docNumber} (Realm: ${realmId})`);
 
     // 1. Resolve the wallet for this external entity
     // In a real scenario, realmId + customerId maps to a specific Agency wallet
@@ -32,7 +39,7 @@ export class IngestionService {
       // For demo purposes, we create a wallet if not found. 
       // In production, this might trigger an onboarding flow or lookup.
       wallet = await this.walletService.createWallet({
-        name: qbInvoice.customerName,
+        name: qbInvoice.customerName || qbInvoice.name,
         type: 'BUSINESS',
         email: `${qbInvoice.customerId}@quickbooks.temp`,
         metadata: { qbCustomerId: qbInvoice.customerId, realmId },

@@ -10,22 +10,22 @@ export class QuickBooksMapper {
   mapToInternalInvoice(qbInvoice: NormalizedInvoice, walletId: string) {
     return {
       walletId,
-      externalId: qbInvoice.externalId,
-      invoiceNumber: qbInvoice.invoiceNumber,
+      externalId: qbInvoice.externalId || qbInvoice.id,
+      invoiceNumber: qbInvoice.invoiceNumber || qbInvoice.docNumber || '',
       amount: qbInvoice.amount,
       currency: qbInvoice.currency || 'USD',
       status: this.mapStatus(qbInvoice.status),
       dueDate: qbInvoice.dueDate ? new Date(qbInvoice.dueDate) : null,
       metadata: {
         ...qbInvoice.metadata,
-        customerName: qbInvoice.customerName,
+        customerName: qbInvoice.customerName || qbInvoice.name,
         customerId: qbInvoice.customerId,
       },
       lineItems: {
-        create: qbInvoice.lineItems.map((item) => ({
-          description: item.description,
+        create: (qbInvoice.lineItems || []).map((item) => ({
+          description: item.description || '',
           amount: item.amount,
-          quantity: item.quantity,
+          quantity: item.quantity || 1,
         })),
       },
     };
