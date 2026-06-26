@@ -11,7 +11,7 @@ async function test() {
   // Set SSL rejectUnauthorized to false
   config.ssl = { rejectUnauthorized: false };
   
-  const pool = new pg.Pool(config);
+  const pool = new pg.Pool(config as any);
   console.log('Pool configured SSL:', pool.options.ssl);
   
   try {
