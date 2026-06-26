@@ -101,12 +101,12 @@ export class QuickBooksService {
 
   // ─── OAuth Helpers ────────────────────────────────────────────────────────
 
-  private getOAuthClient(token?: any) {
+  private getOAuthClient(token?: any, redirectUri?: string) {
     const client = new OAuthClient({
       clientId: this.clientId,
       clientSecret: this.clientSecret,
       environment: this.environment,
-      redirectUri: this.redirectUri,
+      redirectUri: redirectUri || this.redirectUri,
     });
     if (token) client.setToken(token);
     return client;
@@ -151,7 +151,16 @@ export class QuickBooksService {
 
   async exchangeOAuthCode(callbackUrl: string, realmId?: string): Promise<void> {
     if (!this.configured) throw new Error('QuickBooks OAuth is not configured.');
-    const oauthClient = this.getOAuthClient();
+
+    let exchangeRedirectUri = this.redirectUri;
+    try {
+      const parsedUrl = new URL(callbackUrl);
+      exchangeRedirectUri = `${parsedUrl.origin}${parsedUrl.pathname}`;
+    } catch (err) {
+      this.logger.warn('Failed to parse callbackUrl, falling back to default redirectUri', err);
+    }
+
+    const oauthClient = this.getOAuthClient(undefined, exchangeRedirectUri);
     const authResponse = await oauthClient.createToken(callbackUrl);
     const tokenData = authResponse.getJson();
     if (realmId) tokenData.realmId = realmId;
