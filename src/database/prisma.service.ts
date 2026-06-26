@@ -12,7 +12,7 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
-    const pool = new pg.Pool({
+    const poolOptions: pg.PoolConfig = {
       connectionString: process.env.DATABASE_URL,
 
       // --- Connection Pool Limits (Production-grade) ---
@@ -22,7 +22,13 @@ export class PrismaService
       connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECT_TIMEOUT || '5000', 10),
       // Statement timeout to kill runaway queries (10s default)
       statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT || '10000', 10),
-    });
+    };
+
+    if (process.env.DATABASE_URL?.includes('sslmode=') || process.env.DATABASE_URL?.includes('ssl=')) {
+      poolOptions.ssl = { rejectUnauthorized: false };
+    }
+
+    const pool = new pg.Pool(poolOptions);
 
     const adapter = new PrismaPg(pool);
 

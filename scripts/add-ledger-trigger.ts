@@ -3,7 +3,11 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import 'dotenv/config';
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const poolOptions: pg.PoolConfig = { connectionString: process.env.DATABASE_URL };
+if (process.env.DATABASE_URL?.includes('sslmode=') || process.env.DATABASE_URL?.includes('ssl=')) {
+  poolOptions.ssl = { rejectUnauthorized: false };
+}
+const pool = new pg.Pool(poolOptions);
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
