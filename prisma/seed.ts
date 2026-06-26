@@ -4,9 +4,13 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 
-const pool = new pg.Pool({
+const poolOptions: pg.PoolConfig = {
   connectionString: process.env.DATABASE_URL,
-});
+};
+if (process.env.DATABASE_URL?.includes('sslmode=') || process.env.DATABASE_URL?.includes('ssl=')) {
+  poolOptions.ssl = { rejectUnauthorized: false };
+}
+const pool = new pg.Pool(poolOptions);
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
