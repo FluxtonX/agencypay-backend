@@ -1,4 +1,3 @@
-import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import 'dotenv/config';
 import { parse } from 'pg-connection-string';
@@ -6,18 +5,13 @@ import { parse } from 'pg-connection-string';
 async function test() {
   console.log('DATABASE_URL:', process.env.DATABASE_URL);
   
-  const parsed = parse(process.env.DATABASE_URL || '');
-  console.log('Parsed connection string SSL:', parsed.ssl);
+  const config = parse(process.env.DATABASE_URL || '');
+  console.log('Original parsed config SSL:', config.ssl);
   
-  const poolOptions: pg.PoolConfig = {
-    connectionString: process.env.DATABASE_URL,
-  };
-  if (process.env.DATABASE_URL?.includes('sslmode=') || process.env.DATABASE_URL?.includes('ssl=')) {
-    poolOptions.ssl = { rejectUnauthorized: false };
-  }
+  // Set SSL rejectUnauthorized to false
+  config.ssl = { rejectUnauthorized: false };
   
-  // Create pool
-  const pool = new pg.Pool(poolOptions);
+  const pool = new pg.Pool(config);
   console.log('Pool configured SSL:', pool.options.ssl);
   
   try {
