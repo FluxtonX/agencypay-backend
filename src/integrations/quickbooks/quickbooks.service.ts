@@ -234,7 +234,7 @@ export class QuickBooksService {
 
       if (!realmId) return { connected: true, invoices: MOCK_INVOICES };
 
-      const query = `select * from Invoice order by MetaData.LastUpdatedTime desc maxresults 10`;
+      const query = `select * from Invoice order by MetaData.LastUpdatedTime desc maxresults 1000`;
       const response = await oauthClient.makeApiCall({
         url: `${this.baseUrl}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`,
         method: 'GET',
@@ -308,8 +308,8 @@ export class QuickBooksService {
 
       if (!realmId) return { connected: true, payouts: MOCK_PAYOUTS };
 
-      const payoutsQuery = `select * from BillPayment order by MetaData.LastUpdatedTime desc maxresults 10`;
-      const purchasesQuery = `select * from Purchase order by MetaData.LastUpdatedTime desc maxresults 10`;
+      const payoutsQuery = `select * from BillPayment order by MetaData.LastUpdatedTime desc maxresults 1000`;
+      const purchasesQuery = `select * from Purchase order by MetaData.LastUpdatedTime desc maxresults 1000`;
 
       const [payoutsRes, purchasesRes] = await Promise.all([
         oauthClient.makeApiCall({
