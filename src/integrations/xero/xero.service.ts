@@ -84,12 +84,9 @@ export class XeroService {
     
     const scopes = [
       'offline_access',
-      'accounting.transactions',
+      'accounting.invoices',
+      'accounting.payments',
       'accounting.contacts',
-      'accounting.settings',
-      'openid',
-      'profile',
-      'email',
     ].join(' ');
 
     const params = new URLSearchParams({
@@ -100,7 +97,12 @@ export class XeroService {
       state: 'xero-oauth-state',
     });
 
-    return `https://login.xero.com/identity/connect/authorize?${params.toString()}`;
+    const url = `https://login.xero.com/identity/connect/authorize?${params.toString()}`;
+    
+    this.logger.log(`[XERO AUTH] Generated Connect URL: ${url}`);
+    this.logger.log(`[XERO AUTH] Requested Scopes: ${scopes}`);
+
+    return url;
   }
 
   // ─── Exchange Authorization Code ─────────────────────────────────────────
