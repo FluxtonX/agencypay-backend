@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TokenStorageService } from '../token-storage.service.js';
@@ -111,9 +111,12 @@ export class XeroService {
     if (!this.configured) throw new Error('Xero OAuth is not configured.');
 
     let code = '';
+    let dynamicRedirectUri = this.redirectUri;
     try {
       const urlObj = new URL(callbackUrl);
       code = urlObj.searchParams.get('code') || '';
+      dynamicRedirectUri = `${urlObj.origin}${urlObj.pathname}`;
+      this.logger.log(`[XERO AUTH] Dynamic Redirect URI resolved: ${dynamicRedirectUri}`);
     } catch {
       code = callbackUrl; // fallback if only raw code is passed
     }
@@ -132,14 +135,18 @@ export class XeroService {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: this.redirectUri,
+        redirect_uri: dynamicRedirectUri,
       }),
     });
 
     if (!response.ok) {
       const errBody = await response.text();
-      this.logger.error(`Xero OAuth Exchange failed: ${errBody}`);
-      throw new Error(`Xero OAuth Exchange failed: ${response.statusText}`);
+      this.logger.error(`[XERO AUTH] Exchange failed (Status ${response.status}): ${errBody}`);
+      throw new BadRequestException({
+        message: 'Xero token exchange failed.',
+        xeroStatus: response.status,
+        xeroResponse: errBody,
+      });
     }
 
     const tokenData = await response.json();
