@@ -33,6 +33,7 @@ import { OutboxModule } from './modules/outbox/outbox.module.js';
 import { QuickBooksModule } from './integrations/quickbooks/quickbooks.module.js';
 import { PlaidModule } from './integrations/plaid/plaid.module.js';
 import { ColumnModule } from './integrations/column/column.module.js';
+import { XeroModule } from './integrations/xero/xero.module.js';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { ColumnModule } from './integrations/column/column.module.js';
     QuickBooksModule,
     PlaidModule,
     ColumnModule,
+    XeroModule,
   ],
   providers: [
     // Global JWT guard — all routes require auth unless @Public()
