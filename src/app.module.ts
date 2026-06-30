@@ -34,6 +34,7 @@ import { QuickBooksModule } from './integrations/quickbooks/quickbooks.module.js
 import { PlaidModule } from './integrations/plaid/plaid.module.js';
 import { ColumnModule } from './integrations/column/column.module.js';
 import { XeroModule } from './integrations/xero/xero.module.js';
+import { MailModule } from './modules/mail/mail.module.js';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { XeroModule } from './integrations/xero/xero.module.js';
     PlaidModule,
     ColumnModule,
     XeroModule,
+    MailModule,
   ],
   providers: [
     // Global JWT guard — all routes require auth unless @Public()

@@ -1,8 +1,9 @@
-import { Injectable, ConflictException, UnauthorizedException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import { JwtService } from '@nestjs/jwt';
-import { RegisterDto, LoginDto } from './dto/auth.dto.js';
+import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto.js';
+import { MailService } from '../mail/mail.service.js';
 import { WalletType } from '@prisma/client';
 import { UserRole } from '../../common/constants/roles.js';
 import * as crypto from 'crypto';
@@ -15,6 +16,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
     private readonly jwtService: JwtService,
+    private readonly mailService: MailService,
   ) {}
 
   /**
@@ -138,5 +140,59 @@ export class AuthService {
         walletId: user.walletId,
       },
     };
+  }
+
+  /**
+   * Directly resets the user's password.
+   */
+  async forgotPassword(dto: ForgotPasswordDto): Promise<void> {
+    const email = dto.email.trim().toLowerCase();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User with this email does not exist.');
+    }
+
+    const passwordHash = this.hashPassword(dto.password);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    this.logger.log(`Password successfully direct-reset for user ${email}`);
+  }
+
+  /**
+   * Verifies the stateless reset token and updates the user's password.
+   */
+  async resetPassword(dto: ResetPasswordDto): Promise<void> {
+    const email = dto.email.trim().toLowerCase();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired token.');
+    }
+
+    const secret = (process.env.JWT_SECRET || 'agncypay-fallback-jwt-secret') + user.passwordHash;
+    try {
+      await this.jwtService.verifyAsync(dto.token, { secret });
+    } catch (err) {
+      this.logger.error(`Token verification failed for email ${email}`, err);
+      throw new BadRequestException('Invalid or expired token.');
+    }
+
+    const passwordHash = this.hashPassword(dto.password);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    this.logger.log(`Password successfully reset for user ${email}`);
   }
 }
