@@ -82,6 +82,31 @@ export class AuthService {
         },
       });
 
+      // Auto-claim any pending invitations / connection requests for this email
+      const pendingConnections = await tx.connection.findMany({
+        where: {
+          email,
+          status: 'PENDING'
+        }
+      });
+
+      for (const conn of pendingConnections) {
+        await tx.connection.update({
+          where: { id: conn.id },
+          data: { receiverId: user.id }
+        });
+
+        // Trigger notification for the newly registered user
+        const sender = await tx.user.findUnique({ where: { id: conn.senderId } });
+        await tx.notification.create({
+          data: {
+            userId: user.id,
+            title: 'Pending Connection Request',
+            message: `${sender?.fullName || 'A partner'} has a pending connection request for you.`
+          }
+        });
+      }
+
       this.logger.log(`Successfully registered user ${email} with wallet ${walletData.id}`);
 
       return {
