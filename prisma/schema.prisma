@@ -63,6 +63,12 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  sentConnections     Connection[]              @relation("SentConnections")
+  receivedConnections Connection[]              @relation("ReceivedConnections")
+  relationshipsA      Relationship[]            @relation("RelationshipRoleA")
+  relationshipsB      Relationship[]            @relation("RelationshipRoleB")
+  notifications       Notification[]            @relation("UserNotifications")
+
   @@map("users")
 }
 
@@ -525,4 +531,68 @@ model EventDelivery {
   @@unique([outboxEventId, consumerName])
   @@index([outboxEventId])
   @@map("event_deliveries")
+}
+
+// =============================================================================
+// UNIFIED CONNECTION & INVITATION SYSTEM
+// =============================================================================
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+model Connection {
+  id         String           @id @default(uuid())
+  senderId   String           @map("sender_id")
+  receiverId String?          @map("receiver_id") // Nullable if the receiver has not registered yet
+  email      String           @map("email")       // Target email address
+  status     InvitationStatus @default(PENDING)
+  type       String           // "BRAND_TO_AGENCY" | "BRAND_TO_TALENT" | "AGENCY_TO_TALENT"
+  token      String           @unique
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+
+  sender     User             @relation("SentConnections", fields: [senderId], references: [id])
+  receiver   User?            @relation("ReceivedConnections", fields: [receiverId], references: [id])
+
+  @@unique([senderId, email])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([status])
+  @@map("connections")
+}
+
+model Relationship {
+  id        String   @id @default(uuid())
+  roleAId   String   @map("role_a_id") // Brand or Agency
+  roleBId   String   @map("role_b_id") // Agency or Talent
+  type      String   // "BRAND_AGENCY" | "BRAND_TALENT" | "AGENCY_TALENT"
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  roleA     User     @relation("RelationshipRoleA", fields: [roleAId], references: [id])
+  roleB     User     @relation("RelationshipRoleB", fields: [roleBId], references: [id])
+
+  @@unique([roleAId, roleBId])
+  @@index([roleAId])
+  @@index([roleBId])
+  @@map("relationships")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation("UserNotifications", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("notifications")
 }

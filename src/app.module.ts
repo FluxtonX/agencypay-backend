@@ -28,6 +28,9 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 import { IngestionModule } from './modules/ingestion/ingestion.module.js';
 import { ComplianceModule } from './modules/compliance/compliance.module.js';
 import { OutboxModule } from './modules/outbox/outbox.module.js';
+import { AgenciesModule } from './modules/agencies/agencies.module.js';
+import { TalentsModule } from './modules/talents/talents.module.js';
+import { ConnectionsModule } from './modules/connections/connections.module.js';
 
 // Integration Modules
 import { QuickBooksModule } from './integrations/quickbooks/quickbooks.module.js';
@@ -82,6 +85,11 @@ import { MailModule } from './modules/mail/mail.module.js';
 
     // Event Persistence
     OutboxModule,
+
+    // Agencies
+    AgenciesModule,
+    TalentsModule,
+    ConnectionsModule,
 
     // Integrations
     QuickBooksModule,
