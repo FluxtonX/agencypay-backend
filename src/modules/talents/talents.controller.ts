@@ -55,10 +55,10 @@ export class TalentsController {
   }
 
   /**
-   * Lists invitations sent by the agency. Restrained to AGENCIES.
+   * Lists invitations sent by the agency. Restrained to BRANDS and AGENCIES.
    */
   @Get('invitations')
-  @Roles(UserRole.AGENCY)
+  @Roles(UserRole.BRAND, UserRole.AGENCY)
   @HttpCode(HttpStatus.OK)
   async getInvitations(@Req() req: any) {
     const agencyId = req.user.userId;
@@ -67,10 +67,10 @@ export class TalentsController {
   }
 
   /**
-   * Lists connected talents for the agency. Restrained to AGENCIES.
+   * Lists connected talents for the agency. Restrained to BRANDS and AGENCIES.
    */
   @Get('connected')
-  @Roles(UserRole.AGENCY)
+  @Roles(UserRole.BRAND, UserRole.AGENCY)
   @HttpCode(HttpStatus.OK)
   async getConnectedTalents(@Req() req: any) {
     const agencyId = req.user.userId;

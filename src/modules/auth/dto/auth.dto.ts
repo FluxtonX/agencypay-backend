@@ -18,6 +18,10 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   workspaceName?: string;
+
+  @IsString()
+  @IsOptional()
+  inviteToken?: string;
 }
 
 export class LoginDto {
