@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
+import { EmailService } from '../mail/email.service.js';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class TalentsService {
   private readonly logger = new Logger(TalentsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService
+  ) {}
 
   /**
    * Invites a talent by email.
@@ -82,7 +86,7 @@ export class TalentsService {
   /**
    * Resends a pending or expired invitation.
    */
-  async resendInvitation(agencyId: string, invitationId: string) {
+  async resendInvitation(agencyId: string, invitationId: string, frontendOrigin: string = 'http://localhost:3000') {
     const invitation = await this.prisma.connection.findFirst({
       where: {
         id: invitationId,
@@ -108,6 +112,13 @@ export class TalentsService {
         updatedAt: new Date(),
       },
     });
+
+    const inviteLink = `${frontendOrigin}/invite/${token}`;
+    try {
+      await this.emailService.sendInvitationEmail(invitation.email, inviteLink);
+    } catch (err: any) {
+      this.logger.error(`Failed to resend invitation email to ${invitation.email}: ${err.message}`);
+    }
 
     this.logger.log(`Agency ${agencyId} resent invitation to ${invitation.email}`);
     return updatedInvitation;

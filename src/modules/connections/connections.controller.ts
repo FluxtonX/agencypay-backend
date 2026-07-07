@@ -2,6 +2,8 @@ import { Controller, Get, Post, Delete, Body, Param, Req, HttpCode, HttpStatus, 
 import { ConnectionsService } from './connections.service.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { UserRole } from '../../common/constants/roles.js';
+import { Public } from '../../common/decorators/public.decorator.js';
+import { CreateConnectionRequestDto } from './dto/create-connection-request.dto.js';
 
 @Controller('connections')
 export class ConnectionsController {
@@ -39,11 +41,19 @@ export class ConnectionsController {
   @HttpCode(HttpStatus.OK)
   async requestConnection(
     @Req() req: any,
-    @Body('email') email: string,
-    @Body('type') type: string
+    @Body() dto: CreateConnectionRequestDto
   ) {
     const senderId = req.user.userId;
-    const result = await this.connectionsService.sendConnectionRequest(senderId, email, type);
+    // Extract origin (e.g. localhost or vercel)
+    let frontendOrigin = req.headers.origin || req.headers.referer || 'http://localhost:3000';
+    try {
+      const url = new URL(frontendOrigin);
+      frontendOrigin = url.origin;
+    } catch {
+      // Use fallback
+      frontendOrigin = 'http://localhost:3000';
+    }
+    const result = await this.connectionsService.sendConnectionRequest(senderId, dto.email, dto.type, frontendOrigin);
     return { success: true, data: result };
   }
 
@@ -153,5 +163,16 @@ export class ConnectionsController {
     const userId = req.user.userId;
     const result = await this.connectionsService.markNotificationsRead(userId);
     return { success: true, data: result };
+  }
+
+  /**
+   * Public endpoint to validate an invitation token.
+   */
+  @Public()
+  @Get('invite/:token')
+  @HttpCode(HttpStatus.OK)
+  async validateInvite(@Param('token') token: string) {
+    const invite = await this.connectionsService.getInvitationByToken(token);
+    return { success: true, data: invite };
   }
 }

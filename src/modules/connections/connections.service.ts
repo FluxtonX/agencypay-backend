@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, ConflictException, NotFoundException, 
 import { PrismaService } from '../../database/prisma.service.js';
 import { QuickBooksService } from '../../integrations/quickbooks/quickbooks.service.js';
 import { XeroService } from '../../integrations/xero/xero.service.js';
+import { EmailService } from '../mail/email.service.js';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -11,7 +12,8 @@ export class ConnectionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly quickBooksService: QuickBooksService,
-    private readonly xeroService: XeroService
+    private readonly xeroService: XeroService,
+    private readonly emailService: EmailService
   ) {}
 
   /**
@@ -143,7 +145,7 @@ export class ConnectionsService {
     });
   }
 
-  async sendConnectionRequest(senderId: string, email: string, type: string) {
+  async sendConnectionRequest(senderId: string, email: string, type: string, frontendOrigin = 'http://localhost:3000') {
     const targetEmail = email.trim().toLowerCase();
     const allowedTypes = ['BRAND_TO_AGENCY', 'BRAND_TO_TALENT', 'AGENCY_TO_TALENT'];
     if (!allowedTypes.includes(type)) {
@@ -202,8 +204,8 @@ export class ConnectionsService {
     const token = crypto.randomBytes(32).toString('hex');
 
     if (existingConn) {
-      if (existingConn.status === 'PENDING' || existingConn.status === 'ACCEPTED') {
-        throw new ConflictException(`A connection request is already ${existingConn.status.toLowerCase()}`);
+      if (existingConn.status === 'ACCEPTED') {
+        throw new ConflictException(`A connection request is already accepted`);
       }
 
       // Re-activate connection: update status back to PENDING with a new token
@@ -226,6 +228,15 @@ export class ConnectionsService {
             message: `${sender.fullName} (${sender.role.toUpperCase()}) wants to connect with your workspace.`
           }
         });
+      } else {
+        // Send email invitation for non-registered user
+        const inviteLink = `${frontendOrigin}/invite/${token}`;
+        try {
+          await this.emailService.sendInvitationEmail(targetEmail, inviteLink);
+        } catch (err: any) {
+          this.logger.error(`Failed to send invitation email (re-activate) to ${targetEmail}: ${err.message}`);
+          throw new BadRequestException(`Failed to send invitation email: ${err.message}`);
+        }
       }
 
       this.logger.log(`Re-activated invitation/request for ${targetEmail}`);
@@ -253,6 +264,17 @@ export class ConnectionsService {
           message: `${sender.fullName} (${sender.role.toUpperCase()}) wants to connect with your workspace.`
         }
       });
+    } else {
+      // Send email invitation for non-registered user
+      const inviteLink = `${frontendOrigin}/invite/${token}`;
+      try {
+        await this.emailService.sendInvitationEmail(targetEmail, inviteLink);
+      } catch (err: any) {
+        this.logger.error(`Failed to send invitation email (fresh) to ${targetEmail}: ${err.message}`);
+        // Delete the connection since the email failed
+        await this.prisma.connection.delete({ where: { id: connection.id } });
+        throw new BadRequestException(`Failed to send invitation email: ${err.message}`);
+      }
     }
 
     this.logger.log(`Fresh connection invitation generated for ${targetEmail}`);
@@ -554,5 +576,33 @@ export class ConnectionsService {
       data: { read: true }
     });
     return { success: true };
+  }
+
+  /**
+   * Retrieves an invitation by token, throwing if invalid or not pending.
+   */
+  async getInvitationByToken(token: string) {
+    const connection = await this.prisma.connection.findUnique({
+      where: { token },
+      include: {
+        sender: {
+          select: {
+            fullName: true,
+            email: true,
+            role: true
+          }
+        }
+      }
+    });
+
+    if (!connection) {
+      throw new NotFoundException('Invitation token not found');
+    }
+
+    if (connection.status !== 'PENDING') {
+      throw new BadRequestException(`Invitation has already been ${connection.status.toLowerCase()}`);
+    }
+
+    return connection;
   }
 }
