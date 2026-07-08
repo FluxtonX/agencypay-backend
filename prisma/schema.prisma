@@ -39,6 +39,7 @@ model Wallet {
   externalAccounts ExternalAccount[]
   creditLines      CreditLine[]
   riskAssessments  RiskAssessment[]
+  invoices         Invoice[]
   payments         Payment[]
   payouts          Payout[]
   user             User?
@@ -61,6 +62,12 @@ model User {
   wallet       Wallet?  @relation(fields: [walletId], references: [id])
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+
+  sentConnections     Connection[]              @relation("SentConnections")
+  receivedConnections Connection[]              @relation("ReceivedConnections")
+  relationshipsA      Relationship[]            @relation("RelationshipRoleA")
+  relationshipsB      Relationship[]            @relation("RelationshipRoleB")
+  notifications       Notification[]            @relation("UserNotifications")
 
   @@map("users")
 }
@@ -185,6 +192,58 @@ model LedgerEntry {
 }
 
 // =============================================================================
+// INVOICE DOMAIN (New in Phase 2)
+// =============================================================================
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+model Invoice {
+  id              String        @id @default(uuid())
+  walletId        String
+  externalId      String?       // QuickBooks Invoice ID
+  invoiceNumber   String
+  amount          Decimal       @db.Decimal(19, 4)
+  currency        String        @default("USD")
+  status          InvoiceStatus @default(OPEN)
+  dueDate         DateTime?
+  metadata        Json?
+
+  wallet          Wallet        @relation(fields: [walletId], references: [id])
+  lineItems       InvoiceLineItem[]
+  payments        Payment[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([walletId, externalId])
+  @@index([walletId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  description String?
+  amount      Decimal  @db.Decimal(19, 4)
+  quantity    Decimal  @db.Decimal(19, 4) @default(1)
+  metadata    Json?
+
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+// =============================================================================
 // PAYMENTS DOMAIN
 // =============================================================================
 
@@ -212,8 +271,9 @@ model Payment {
   amount            Decimal       @db.Decimal(19, 4)
   currency          String        @default("USD")
   status            PaymentStatus @default(PENDING)
-  invoiceId         String?       // External invoice reference
-  invoiceData       Json?         // Normalized invoice snapshot
+  invoiceId         String?       // Internal reference to Invoice model
+  invoice           Invoice?      @relation(fields: [invoiceId], references: [id])
+  invoiceData       Json?         // Normalized invoice snapshot (legacy/cache)
   splitConfig       Json?         // Split ratios/participants
   settledAmount     Decimal?      @db.Decimal(19, 4)
   description       String?
@@ -422,4 +482,117 @@ model IdempotencyKey {
   @@index([key])
   @@index([expiresAt])
   @@map("idempotency_keys")
+}
+
+// =============================================================================
+// EVENT SYSTEM (Transactional Outbox)
+// =============================================================================
+
+enum EventStatus {
+  PENDING
+  DISPATCHED
+  FAILED
+  DEAD_LETTER
+}
+
+model OutboxEvent {
+  id            String      @id @default(uuid())
+  eventName     String      // e.g. "payment.settled"
+  aggregateType String      // e.g. "payment"
+  aggregateId   String      // The ID of the related entity
+  payload       Json        // The event data
+  status        EventStatus @default(PENDING)
+  attempts      Int         @default(0)
+  nextAttemptAt DateTime?
+  
+  deliveries    EventDelivery[]
+
+  createdAt    DateTime  @default(now())
+  dispatchedAt DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([aggregateType, aggregateId])
+  @@map("outbox_events")
+}
+
+model EventDelivery {
+  id            String  @id @default(uuid())
+  outboxEventId String
+  consumerName  String  // e.g. "PaymentSettledConsumer"
+  status        String  // "PENDING", "COMPLETED", "FAILED"
+  attempts      Int     @default(0)
+  lastError     String?
+
+  event OutboxEvent @relation(fields: [outboxEventId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([outboxEventId, consumerName])
+  @@index([outboxEventId])
+  @@map("event_deliveries")
+}
+
+// =============================================================================
+// UNIFIED CONNECTION & INVITATION SYSTEM
+// =============================================================================
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+model Connection {
+  id         String           @id @default(uuid())
+  senderId   String           @map("sender_id")
+  receiverId String?          @map("receiver_id") // Nullable if the receiver has not registered yet
+  email      String           @map("email")       // Target email address
+  status     InvitationStatus @default(PENDING)
+  type       String           // "BRAND_TO_AGENCY" | "BRAND_TO_TALENT" | "AGENCY_TO_TALENT"
+  token      String           @unique
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+
+  sender     User             @relation("SentConnections", fields: [senderId], references: [id])
+  receiver   User?            @relation("ReceivedConnections", fields: [receiverId], references: [id])
+
+  @@unique([senderId, email])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([status])
+  @@map("connections")
+}
+
+model Relationship {
+  id        String   @id @default(uuid())
+  roleAId   String   @map("role_a_id") // Brand or Agency
+  roleBId   String   @map("role_b_id") // Agency or Talent
+  type      String   // "BRAND_AGENCY" | "BRAND_TALENT" | "AGENCY_TALENT"
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  roleA     User     @relation("RelationshipRoleA", fields: [roleAId], references: [id])
+  roleB     User     @relation("RelationshipRoleB", fields: [roleBId], references: [id])
+
+  @@unique([roleAId, roleBId])
+  @@index([roleAId])
+  @@index([roleBId])
+  @@map("relationships")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation("UserNotifications", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("notifications")
 }

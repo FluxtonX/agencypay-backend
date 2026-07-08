@@ -1,8 +1,9 @@
-import { Injectable, ConflictException, UnauthorizedException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 import { WalletService } from '../wallet/wallet.service.js';
 import { JwtService } from '@nestjs/jwt';
-import { RegisterDto, LoginDto } from './dto/auth.dto.js';
+import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto.js';
+import { MailService } from '../mail/mail.service.js';
 import { WalletType } from '@prisma/client';
 import { UserRole } from '../../common/constants/roles.js';
 import * as crypto from 'crypto';
@@ -15,6 +16,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
     private readonly jwtService: JwtService,
+    private readonly mailService: MailService,
   ) {}
 
   /**
@@ -42,7 +44,24 @@ export class AuthService {
     const email = dto.email.trim().toLowerCase();
     const fullName = dto.fullName.trim();
 
-    // 1. Check if user already exists
+    // 1. Validate invitation token if provided
+    let inviteConnection: any = null;
+    if (dto.inviteToken) {
+      inviteConnection = await this.prisma.connection.findUnique({
+        where: { token: dto.inviteToken },
+      });
+      if (!inviteConnection) {
+        throw new NotFoundException('Invitation token not found');
+      }
+      if (inviteConnection.status !== 'PENDING') {
+        throw new BadRequestException(`Invitation has already been ${inviteConnection.status.toLowerCase()}`);
+      }
+      if (inviteConnection.email.toLowerCase() !== email) {
+        throw new BadRequestException('Registration email does not match invitation email');
+      }
+    }
+
+    // 2. Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
     });
@@ -51,10 +70,10 @@ export class AuthService {
       throw new ConflictException(`User with email ${email} already exists`);
     }
 
-    // 2. Hash password
+    // 3. Hash password
     const passwordHash = this.hashPassword(dto.password);
 
-    // 3. Create user and provision Wallet/Accounts in a transaction
+    // 4. Create user and provision Wallet/Accounts in a transaction
     return this.prisma.$transaction(async (tx) => {
       // Determine wallet type based on role
       const walletType = dto.roleType === 'talent' ? WalletType.INDIVIDUAL : WalletType.BUSINESS;
@@ -79,6 +98,81 @@ export class AuthService {
           walletId: walletData.id,
         },
       });
+
+      if (inviteConnection) {
+        // Auto-accept the specific invitation
+        await tx.connection.update({
+          where: { id: inviteConnection.id },
+          data: {
+            receiverId: user.id,
+            status: 'ACCEPTED',
+          },
+        });
+
+        // Determine Relationship roles and type
+        let roleAId: string;
+        let roleBId: string;
+        let relType: string;
+
+        if (inviteConnection.type === 'BRAND_TO_AGENCY') {
+          roleAId = inviteConnection.senderId;
+          roleBId = user.id;
+          relType = 'BRAND_AGENCY';
+        } else if (inviteConnection.type === 'BRAND_TO_TALENT') {
+          roleAId = inviteConnection.senderId;
+          roleBId = user.id;
+          relType = 'BRAND_TALENT';
+        } else {
+          roleAId = inviteConnection.senderId;
+          roleBId = user.id;
+          relType = 'AGENCY_TALENT';
+        }
+
+        // Create relationship
+        await tx.relationship.create({
+          data: {
+            roleAId,
+            roleBId,
+            type: relType,
+          },
+        });
+
+        // Notify the sender
+        await tx.notification.create({
+          data: {
+            userId: inviteConnection.senderId,
+            title: 'Invitation Accepted',
+            message: `${user.fullName} accepted your invitation and joined AgencyPay!`,
+          },
+        });
+
+        this.logger.log(`Auto-accepted invitation ${inviteConnection.id} for user ${email}`);
+      } else {
+        // Existing flow: Auto-claim any pending invitations / connection requests for this email
+        const pendingConnections = await tx.connection.findMany({
+          where: {
+            email,
+            status: 'PENDING'
+          }
+        });
+
+        for (const conn of pendingConnections) {
+          await tx.connection.update({
+            where: { id: conn.id },
+            data: { receiverId: user.id }
+          });
+
+          // Trigger notification for the newly registered user
+          const sender = await tx.user.findUnique({ where: { id: conn.senderId } });
+          await tx.notification.create({
+            data: {
+              userId: user.id,
+              title: 'Pending Connection Request',
+              message: `${sender?.fullName || 'A partner'} has a pending connection request for you.`
+            }
+          });
+        }
+      }
 
       this.logger.log(`Successfully registered user ${email} with wallet ${walletData.id}`);
 
@@ -138,5 +232,59 @@ export class AuthService {
         walletId: user.walletId,
       },
     };
+  }
+
+  /**
+   * Directly resets the user's password.
+   */
+  async forgotPassword(dto: ForgotPasswordDto): Promise<void> {
+    const email = dto.email.trim().toLowerCase();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User with this email does not exist.');
+    }
+
+    const passwordHash = this.hashPassword(dto.password);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    this.logger.log(`Password successfully direct-reset for user ${email}`);
+  }
+
+  /**
+   * Verifies the stateless reset token and updates the user's password.
+   */
+  async resetPassword(dto: ResetPasswordDto): Promise<void> {
+    const email = dto.email.trim().toLowerCase();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired token.');
+    }
+
+    const secret = (process.env.JWT_SECRET || 'agncypay-fallback-jwt-secret') + user.passwordHash;
+    try {
+      await this.jwtService.verifyAsync(dto.token, { secret });
+    } catch (err) {
+      this.logger.error(`Token verification failed for email ${email}`, err);
+      throw new BadRequestException('Invalid or expired token.');
+    }
+
+    const passwordHash = this.hashPassword(dto.password);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    this.logger.log(`Password successfully reset for user ${email}`);
   }
 }

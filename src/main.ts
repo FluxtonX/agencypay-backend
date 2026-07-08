@@ -27,9 +27,16 @@ async function bootstrap() {
   // Global exception filter
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  // CORS
+  // CORS — supports comma-separated origins in CORS_ORIGIN env var
+  const rawCorsOrigin = process.env.CORS_ORIGIN || '*';
+  const corsOrigin =
+    rawCorsOrigin === '*'
+      ? '*'
+      : rawCorsOrigin.includes(',')
+        ? rawCorsOrigin.split(',').map((o) => o.trim())
+        : rawCorsOrigin;
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: corsOrigin,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     allowedHeaders: 'Content-Type,Authorization,Idempotency-Key',
   });

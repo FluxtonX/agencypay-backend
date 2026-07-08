@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AgncyPayEvent } from '../../common/constants/events.js';
+import { IngestionService } from '../ingestion/ingestion.service.js';
 import type {
   PaymentEventPayload,
   LedgerEventPayload,
@@ -21,6 +22,8 @@ import type {
 @Injectable()
 export class EventConsumer {
   private readonly logger = new Logger(EventConsumer.name);
+
+  constructor(private readonly ingestionService: IngestionService) {}
 
   // ====================================
   // PAYMENT EVENTS
@@ -218,15 +221,20 @@ export class EventConsumer {
   // ====================================
   // QUICKBOOKS EVENTS
   // ====================================
-
+  
   @OnEvent(AgncyPayEvent.QUICKBOOKS_INVOICE_RECEIVED)
-  handleQuickBooksInvoice(
-    payload: BaseEventPayload & { invoiceId: string; invoice: unknown },
+  async handleQuickBooksInvoice(
+    payload: BaseEventPayload & { realmId: string; invoiceId: string; invoice: any },
   ) {
     this.logger.log(
-      `📄 [EVENT] QuickBooks invoice received: ${payload.invoiceId}`,
+      `📄 [EVENT] QuickBooks invoice received: ${payload.invoiceId} (Realm: ${payload.realmId})`,
     );
-    // Future: auto-create payment splits, notify stakeholders
+    
+    try {
+      await this.ingestionService.ingestQuickBooksInvoice(payload.invoice, payload.realmId);
+    } catch (error) {
+      this.logger.error(`Failed to ingest QB invoice ${payload.invoiceId}: ${error.message}`);
+    }
   }
 
   @OnEvent(AgncyPayEvent.QUICKBOOKS_WEBHOOK_DUPLICATE)

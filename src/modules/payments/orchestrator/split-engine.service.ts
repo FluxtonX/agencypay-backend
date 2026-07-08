@@ -8,7 +8,7 @@ import { LedgerService, type DbClient } from '../../ledger/ledger.service.js';
 import { Money } from '../../../common/utils/money.util.js';
 import type { SplitInvoiceDto, SplitResult } from '../dto/split.dto.js';
 import type { LedgerEntryDto } from '../../ledger/dto/ledger.dto.js';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 /**
  * SplitEngine — Computes balanced ledger entries for multi-party payment splits.

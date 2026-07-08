@@ -14,7 +14,7 @@ import { AgncyPayEvent } from '../../common/constants/events.js';
 import type { InitiatePayoutDto, PayoutWebhookDto } from './dto/payout.dto.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { Payout } from '@prisma/client';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 @Injectable()
 export class PayoutsService {

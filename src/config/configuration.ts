@@ -15,6 +15,15 @@ export default () => ({
       process.env.QUICKBOOKS_REDIRECT_URI ||
       'http://localhost:3000/api/auth/quickbooks/callback',
   },
+  xero: {
+    clientId: process.env.XERO_CLIENT_ID || '',
+    clientSecret: process.env.XERO_CLIENT_SECRET || '',
+    webhookToken: process.env.XERO_WEBHOOK_TOKEN || '',
+    baseUrl: process.env.XERO_BASE_URL || 'https://api.xero.com',
+    redirectUri:
+      process.env.XERO_REDIRECT_URI ||
+      'http://localhost:3000/api/auth/xero/callback',
+  },
   plaid: {
     clientId: process.env.PLAID_CLIENT_ID || '',
     secret: process.env.PLAID_SECRET || '',

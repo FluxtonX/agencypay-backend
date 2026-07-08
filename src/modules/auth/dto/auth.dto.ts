@@ -18,6 +18,10 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   workspaceName?: string;
+
+  @IsString()
+  @IsOptional()
+  inviteToken?: string;
 }
 
 export class LoginDto {
@@ -25,5 +29,26 @@ export class LoginDto {
   email: string;
 
   @IsString()
+  password: string;
+}
+
+export class ForgotPasswordDto {
+  @IsEmail({}, { message: 'Invalid email format' })
+  email: string;
+
+  @IsString()
+  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  password: string;
+}
+
+export class ResetPasswordDto {
+  @IsEmail({}, { message: 'Invalid email format' })
+  email: string;
+
+  @IsString()
+  token: string;
+
+  @IsString()
+  @MinLength(8, { message: 'Password must be at least 8 characters long' })
   password: string;
 }

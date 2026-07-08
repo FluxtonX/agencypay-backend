@@ -62,6 +62,14 @@ interface IntegrationsStore {
     createdAt: number;
     token_type?: string;
   };
+  xero?: {
+    access_token: string; // encrypted
+    refresh_token?: string; // encrypted
+    tenantId?: string;
+    expires_in?: number;
+    createdAt: number;
+    token_type?: string;
+  };
 }
 
 @Injectable()
@@ -191,5 +199,61 @@ export class TokenStorageService {
     delete store.quickbooks;
     this.writeStore(store);
     this.logger.log('QuickBooks token cleared.');
+  }
+
+  // ─── Xero ────────────────────────────────────────────────────────────────
+
+  saveXeroToken(token: {
+    access_token?: string;
+    refresh_token?: string;
+    tenantId?: string;
+    expires_in?: number;
+    token_type?: string;
+  }): void {
+    const store = this.readStore();
+    store.xero = {
+      access_token: token.access_token ? encrypt(token.access_token) : '',
+      refresh_token: token.refresh_token ? encrypt(token.refresh_token) : undefined,
+      tenantId: token.tenantId,
+      expires_in: token.expires_in,
+      createdAt: Date.now(),
+      token_type: token.token_type || 'bearer',
+    };
+    this.writeStore(store);
+    this.logger.log('Xero token saved.');
+  }
+
+  getXeroToken(): {
+    access_token?: string;
+    refresh_token?: string;
+    tenantId?: string;
+    expires_in?: number;
+    createdAt: number;
+    token_type?: string;
+  } | null {
+    const store = this.readStore();
+    if (!store.xero?.access_token) return null;
+    try {
+      return {
+        access_token: decrypt(store.xero.access_token),
+        refresh_token: store.xero.refresh_token
+          ? decrypt(store.xero.refresh_token)
+          : undefined,
+        tenantId: store.xero.tenantId,
+        expires_in: store.xero.expires_in,
+        createdAt: store.xero.createdAt,
+        token_type: store.xero.token_type,
+      };
+    } catch (e) {
+      this.logger.error('Failed to decrypt Xero token', e);
+      return null;
+    }
+  }
+
+  clearXeroToken(): void {
+    const store = this.readStore();
+    delete store.xero;
+    this.writeStore(store);
+    this.logger.log('Xero token cleared.');
   }
 }

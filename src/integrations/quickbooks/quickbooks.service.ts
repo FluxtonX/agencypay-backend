@@ -4,6 +4,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgncyPayEvent } from '../../common/constants/events.js';
 import { TokenStorageService } from '../token-storage.service.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const OAuthClient = require('intuit-oauth');
 
@@ -18,6 +21,15 @@ export interface NormalizedInvoice {
   amount: number;
   status: string;
   daysText: string;
+  // Fields needed by ingestion:
+  externalId?: string;
+  invoiceNumber?: string;
+  customerId?: string;
+  customerName?: string;
+  currency?: string;
+  dueDate?: string;
+  metadata?: Record<string, any>;
+  lineItems?: Array<{ description?: string; amount: number; quantity?: number }>;
 }
 
 export interface NormalizedPayout {
@@ -89,12 +101,12 @@ export class QuickBooksService {
 
   // ─── OAuth Helpers ────────────────────────────────────────────────────────
 
-  private getOAuthClient(token?: any) {
+  private getOAuthClient(token?: any, redirectUri?: string) {
     const client = new OAuthClient({
       clientId: this.clientId,
       clientSecret: this.clientSecret,
       environment: this.environment,
-      redirectUri: this.redirectUri,
+      redirectUri: redirectUri || this.redirectUri,
     });
     if (token) client.setToken(token);
     return client;
@@ -139,7 +151,16 @@ export class QuickBooksService {
 
   async exchangeOAuthCode(callbackUrl: string, realmId?: string): Promise<void> {
     if (!this.configured) throw new Error('QuickBooks OAuth is not configured.');
-    const oauthClient = this.getOAuthClient();
+
+    let exchangeRedirectUri = this.redirectUri;
+    try {
+      const parsedUrl = new URL(callbackUrl);
+      exchangeRedirectUri = `${parsedUrl.origin}${parsedUrl.pathname}`;
+    } catch (err) {
+      this.logger.warn('Failed to parse callbackUrl, falling back to default redirectUri', err);
+    }
+
+    const oauthClient = this.getOAuthClient(undefined, exchangeRedirectUri);
     const authResponse = await oauthClient.createToken(callbackUrl);
     const tokenData = authResponse.getJson();
     if (realmId) tokenData.realmId = realmId;
@@ -213,7 +234,7 @@ export class QuickBooksService {
 
       if (!realmId) return { connected: true, invoices: MOCK_INVOICES };
 
-      const query = `select * from Invoice order by MetaData.LastUpdatedTime desc maxresults 10`;
+      const query = `select * from Invoice order by MetaData.LastUpdatedTime desc maxresults 1000`;
       const response = await oauthClient.makeApiCall({
         url: `${this.baseUrl}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`,
         method: 'GET',
@@ -287,8 +308,8 @@ export class QuickBooksService {
 
       if (!realmId) return { connected: true, payouts: MOCK_PAYOUTS };
 
-      const payoutsQuery = `select * from BillPayment order by MetaData.LastUpdatedTime desc maxresults 10`;
-      const purchasesQuery = `select * from Purchase order by MetaData.LastUpdatedTime desc maxresults 10`;
+      const payoutsQuery = `select * from BillPayment order by MetaData.LastUpdatedTime desc maxresults 1000`;
+      const purchasesQuery = `select * from Purchase order by MetaData.LastUpdatedTime desc maxresults 1000`;
 
       const [payoutsRes, purchasesRes] = await Promise.all([
         oauthClient.makeApiCall({

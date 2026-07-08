@@ -18,7 +18,7 @@ import type {
   Account,
   PrismaClient,
 } from '@prisma/client';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 // ---------------------------------------------------------------------------
 // Transaction-aware client types
@@ -55,6 +55,8 @@ export type DbClient = PrismaService | PrismaTxClient;
  * 4. Entries use positive = debit, negative = credit convention.
  * 5. Posted transactions are IMMUTABLE — reversals create new transactions linked via originalTransactionId.
  */
+import { OutboxService } from '../outbox/outbox.service.js';
+
 @Injectable()
 export class LedgerService {
   private readonly logger = new Logger(LedgerService.name);
@@ -62,6 +64,7 @@ export class LedgerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly outboxService: OutboxService,
   ) {}
 
   // ===========================================================================
@@ -165,6 +168,23 @@ export class LedgerService {
       },
       include: { entries: true },
     });
+
+    // 7. Record outbox event for durability
+    await this.outboxService.recordEvent(
+      AgncyPayEvent.LEDGER_TRANSACTION_POSTED,
+      'ledger',
+      transaction.id,
+      {
+        eventId: uuidv4(),
+        timestamp: new Date().toISOString(),
+        source: 'LedgerService',
+        transactionId: transaction.id,
+        referenceId: dto.referenceId,
+        referenceType: dto.referenceType,
+        entryCount: transaction.entries.length,
+      },
+      db,
+    );
 
     this.logger.log(
       `Ledger transaction posted: ${transaction.id} (ref: ${dto.referenceId}, type: ${dto.type})`,

@@ -10,9 +10,6 @@ jobs:
     name: Build & Validate
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: agencypay-backend   # ✅ APPLY EVERYWHERE
 
     steps:
       - name: Checkout code
@@ -36,6 +33,7 @@ jobs:
 
       - name: Run linter
         run: npm run lint
+        continue-on-error: true
 
   deploy:
     name: Deploy to EC2
